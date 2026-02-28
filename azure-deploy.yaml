@@ -1,0 +1,94 @@
+# Azure Container Apps Deployment
+# Deploy to Azure Container Apps using this configuration
+
+# ─── Option 1: Azure Container Apps (Recommended) ────────────────────────────
+# azure-container-app.yaml
+apiVersion: 2023-05-01
+properties:
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8000
+      transport: http
+      allowInsecure: false
+  template:
+    containers:
+      - name: stock-market-analyst
+        image: <YOUR_ACR_NAME>.azurecr.io/stock-market-analyst:latest
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+        env:
+          - name: PYTHONUNBUFFERED
+            value: "1"
+        probes:
+          - type: liveness
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+    scale:
+      minReplicas: 1
+      maxReplicas: 3
+      rules:
+        - name: http-scaling
+          http:
+            metadata:
+              concurrentRequests: "50"
+
+---
+# ─── Option 2: Azure App Service (docker-compose) ────────────────────────────
+# Use docker-compose.yml directly in Azure App Service
+# Command: az webapp create --resource-group <RG> --plan <PLAN> --name <APP_NAME> --multicontainer-config-type compose --multicontainer-config-file docker-compose.yml
+
+---
+# ─── GitHub Actions CI/CD Pipeline ───────────────────────────────────────────
+# .github/workflows/azure-deploy.yml
+name: Build and Deploy to Azure
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY_NAME: <YOUR_ACR_NAME>
+  APP_NAME: stock-market-analyst
+  RESOURCE_GROUP: stock-analyst-rg
+  CONTAINER_APP_NAME: stock-market-analyst
+  CONTAINER_APP_ENV: stock-analyst-env
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.REGISTRY_NAME }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }} .
+          docker tag ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }} \
+                     ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:latest
+
+      - name: Push to ACR
+        run: |
+          docker push ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:latest
+
+      - name: Deploy to Azure Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }}
