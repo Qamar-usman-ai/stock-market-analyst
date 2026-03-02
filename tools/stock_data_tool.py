@@ -3,123 +3,60 @@ import pandas as pd
 import json
 import os
 import requests
-from datetime import datetime, timedelta
-from typing import Optional
 from langchain_core.tools import tool
 
-# ─── BROWSER EMULATION (STOPS AZURE FROM BEING BLOCKED) ──────────────────────
-# We create a persistent session to bypass Yahoo's bot detection
+# Enhanced Session to bypass Azure-specific blocks
 session = requests.Session()
 session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Origin': 'https://finance.yahoo.com',
-    'Referer': 'https://finance.yahoo.com/'
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
 })
 
 @tool
-def scrape_stock_data(
-    ticker: str,
-    period_years: int = 2,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-) -> str:
+def scrape_stock_data(ticker: str, period_years: int = 2) -> str:
     """
-    Scrape historical stock data using yfinance with UTF-8 and Azure compatibility.
-    
-    Args:
-        ticker: Stock ticker symbol (e.g., 'AAPL', 'MSFT', 'V')
-        period_years: Number of years of historical data to fetch (default: 2)
-        start_date: Optional start date in YYYY-MM-DD format
-        end_date: Optional end date in YYYY-MM-DD format
-    
-    Returns:
-        JSON string with stock data summary and file path
+    Force-scrapes stock data using a download-first approach.
     """
     try:
-        ticker_upper = ticker.upper()
-        stock = yf.Ticker(ticker_upper, session=session)
+        symbol = ticker.upper().strip()
         
-        # 1. Fetch data with fallback logic
-        if start_date and end_date:
-            hist = stock.history(start=start_date, end=end_date)
-        else:
-            # period="2y" is more reliable than manual date math on cloud servers
-            hist = stock.history(period=f"{period_years}y")
+        # 1. Use yf.download instead of Ticker.history (often works better on Cloud)
+        # We fetch 2 years of data directly
+        df = yf.download(symbol, period=f"{period_years}y", session=session, progress=False)
         
-        if hist.empty:
-            return json.dumps({
-                "error": f"No data found for {ticker_upper}. Azure IP might be rate-limited.",
-                "status": "failed"
-            }, ensure_ascii=False)
+        if df.empty:
+            return json.dumps({"error": f"Cloud Blocked: Yahoo refused data for {symbol}", "status": "failed"}, ensure_ascii=False)
 
-        # 2. FIX: FLATTEN MULTI-INDEX COLUMNS (Common in 2025/2026 yfinance versions)
-        if isinstance(hist.columns, pd.MultiIndex):
-            hist.columns = hist.columns.get_level_values(0)
+        # 2. Fix the Multi-Index (yfinance 2025/2026 fix)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
             
-        # 3. CLEAN DATA & FIX TIMEZONES
-        hist.reset_index(inplace=True)
-        if hist['Date'].dt.tz is not None:
-            hist['Date'] = hist['Date'].dt.tz_localize(None)
+        # 3. Standardize column names and types
+        df.reset_index(inplace=True)
+        df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
 
-        # 4. CALCULATE TECHNICAL INDICATORS
-        # Moving Averages
-        hist['MA_20'] = hist['Close'].rolling(window=20).mean()
-        hist['MA_50'] = hist['Close'].rolling(window=50).mean()
-        hist['MA_200'] = hist['Close'].rolling(window=200).mean()
-        
-        # RSI (Relative Strength Index)
-        delta = hist['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        hist['RSI'] = 100 - (100 / (1 + rs))
-        
-        # MACD
-        exp1 = hist['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = hist['Close'].ewm(span=26, adjust=False).mean()
-        hist['MACD'] = exp1 - exp2
-        hist['Signal_Line'] = hist['MACD'].ewm(span=9, adjust=False).mean()
+        # 4. Technical Indicators
+        df['MA_50'] = df['Close'].rolling(window=50).mean()
+        df['RSI'] = 100 - (100 / (1 + (df['Close'].diff().where(lambda x: x>0, 0).rolling(14).mean() / 
+                                      -df['Close'].diff().where(lambda x: x<0, 0).rolling(14).mean())))
 
-        # Bollinger Bands
-        hist['BB_Middle'] = hist['Close'].rolling(window=20).mean()
-        hist['BB_Upper'] = hist['BB_Middle'] + 2 * hist['Close'].rolling(window=20).std()
-        hist['BB_Lower'] = hist['BB_Middle'] - 2 * hist['Close'].rolling(window=20).std()
+        # 5. FORCE ABSOLUTE PATHS (Azure Fix)
+        # This ensures the Scraper and Predictor are talking to the EXACT same folder
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(base_dir, "outputs", "data")
+        os.makedirs(data_dir, exist_ok=True)
+        
+        csv_path = os.path.join(data_dir, f"{symbol}_historical.csv")
+        df.to_csv(csv_path, index=False, encoding='utf-8')
 
-        # 5. SAVE DATA (CRITICAL: USE UTF-8 ENCODING)
-        os.makedirs("outputs/data", exist_ok=True)
-        csv_path = f"outputs/data/{ticker_upper}_historical.csv"
-        hist.to_csv(csv_path, index=False, encoding='utf-8')
-        
-        # 6. EXTRACT INFO
-        info = stock.info
-        current_price = float(hist['Close'].iloc[-1])
-        start_price = float(hist['Close'].iloc[0])
-        
-        summary = {
-            "ticker": ticker_upper,
-            "company_name": info.get("longName", ticker_upper),
-            "sector": info.get("sector", "N/A"),
-            "price_stats": {
-                "current_price": round(current_price, 2),
-                "price_change_pct": round(((current_price - start_price) / start_price) * 100, 2),
-                "high_2y": round(float(hist['Close'].max()), 2),
-                "low_2y": round(float(hist['Close'].min()), 2),
-            },
-            "latest_indicators": {
-                "rsi": round(float(hist['RSI'].iloc[-1]), 2) if not pd.isna(hist['RSI'].iloc[-1]) else None,
-                "macd": round(float(hist['MACD'].iloc[-1]), 4) if not pd.isna(hist['MACD'].iloc[-1]) else None,
-                "ma_50": round(float(hist['MA_50'].iloc[-1]), 2) if not pd.isna(hist['MA_50'].iloc[-1]) else None,
-            },
-            "csv_path": csv_path,
+        return json.dumps({
+            "ticker": symbol,
+            "csv_path": csv_path, # Returning the absolute path
+            "current_price": round(float(df['Close'].iloc[-1]), 2),
             "status": "success",
-            "message": "Data successfully scraped and indicators calculated! 📊🚀"
-        }
-        
-        # ensure_ascii=False is the FIX for the codec error
-        return json.dumps(summary, ensure_ascii=False)
+            "message": f"Successfully saved {len(df)} rows to {csv_path} ✅"
+        }, ensure_ascii=False)
     
     except Exception as e:
-        # Returning errors with ensure_ascii=False to prevent further crashes
         return json.dumps({"error": str(e), "status": "failed"}, ensure_ascii=False)
