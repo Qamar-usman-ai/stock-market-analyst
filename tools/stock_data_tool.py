@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from langchain_core.tools import tool
 
-# ─── BROWSER EMULATION (ESSENTIAL FOR AZURE) ──────────────────────────────────
-# This session mimics a real user to prevent Yahoo Finance from blocking Azure IPs
+# ─── BROWSER EMULATION (STOPS AZURE FROM BEING BLOCKED) ──────────────────────
+# We create a persistent session to bypass Yahoo's bot detection
 session = requests.Session()
 session.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -26,37 +26,40 @@ def scrape_stock_data(
     end_date: Optional[str] = None,
 ) -> str:
     """
-    Scrape historical stock data using yfinance with Azure-safe headers.
+    Scrape historical stock data using yfinance with UTF-8 and Azure compatibility.
     
     Args:
         ticker: Stock ticker symbol (e.g., 'AAPL', 'MSFT', 'V')
-        period_years: Years of data to fetch (default: 2)
-        start_date: Optional YYYY-MM-DD
-        end_date: Optional YYYY-MM-DD
+        period_years: Number of years of historical data to fetch (default: 2)
+        start_date: Optional start date in YYYY-MM-DD format
+        end_date: Optional end date in YYYY-MM-DD format
+    
+    Returns:
+        JSON string with stock data summary and file path
     """
     try:
         ticker_upper = ticker.upper()
         stock = yf.Ticker(ticker_upper, session=session)
         
-        # 1. Fetch data using 'period' for higher reliability on cloud servers
+        # 1. Fetch data with fallback logic
         if start_date and end_date:
             hist = stock.history(start=start_date, end=end_date)
         else:
+            # period="2y" is more reliable than manual date math on cloud servers
             hist = stock.history(period=f"{period_years}y")
         
         if hist.empty:
             return json.dumps({
-                "error": f"Yahoo Finance returned no data for {ticker_upper}. This usually means the IP is blocked or the ticker is invalid.",
+                "error": f"No data found for {ticker_upper}. Azure IP might be rate-limited.",
                 "status": "failed"
-            })
+            }, ensure_ascii=False)
 
-        # 2. FIX: FLATTEN MULTI-INDEX COLUMNS (Crucial for 2025/2026 yfinance)
+        # 2. FIX: FLATTEN MULTI-INDEX COLUMNS (Common in 2025/2026 yfinance versions)
         if isinstance(hist.columns, pd.MultiIndex):
             hist.columns = hist.columns.get_level_values(0)
             
-        # 3. CLEAN DATA
+        # 3. CLEAN DATA & FIX TIMEZONES
         hist.reset_index(inplace=True)
-        # Remove timezones for compatibility with CSV and Excel
         if hist['Date'].dt.tz is not None:
             hist['Date'] = hist['Date'].dt.tz_localize(None)
 
@@ -84,17 +87,16 @@ def scrape_stock_data(
         hist['BB_Upper'] = hist['BB_Middle'] + 2 * hist['Close'].rolling(window=20).std()
         hist['BB_Lower'] = hist['BB_Middle'] - 2 * hist['Close'].rolling(window=20).std()
 
-        # 5. GET COMPANY INFO SAFELY
+        # 5. SAVE DATA (CRITICAL: USE UTF-8 ENCODING)
+        os.makedirs("outputs/data", exist_ok=True)
+        csv_path = f"outputs/data/{ticker_upper}_historical.csv"
+        hist.to_csv(csv_path, index=False, encoding='utf-8')
+        
+        # 6. EXTRACT INFO
         info = stock.info
         current_price = float(hist['Close'].iloc[-1])
         start_price = float(hist['Close'].iloc[0])
         
-        # 6. SAVE TO CSV (ENSURE DIRECTORY EXISTS)
-        os.makedirs("outputs/data", exist_ok=True)
-        csv_path = f"outputs/data/{ticker_upper}_historical.csv"
-        hist.to_csv(csv_path, index=False)
-        
-        # 7. BUILD SUMMARY
         summary = {
             "ticker": ticker_upper,
             "company_name": info.get("longName", ticker_upper),
@@ -102,7 +104,8 @@ def scrape_stock_data(
             "price_stats": {
                 "current_price": round(current_price, 2),
                 "price_change_pct": round(((current_price - start_price) / start_price) * 100, 2),
-                "avg_price": round(float(hist['Close'].mean()), 2)
+                "high_2y": round(float(hist['Close'].max()), 2),
+                "low_2y": round(float(hist['Close'].min()), 2),
             },
             "latest_indicators": {
                 "rsi": round(float(hist['RSI'].iloc[-1]), 2) if not pd.isna(hist['RSI'].iloc[-1]) else None,
@@ -110,10 +113,13 @@ def scrape_stock_data(
                 "ma_50": round(float(hist['MA_50'].iloc[-1]), 2) if not pd.isna(hist['MA_50'].iloc[-1]) else None,
             },
             "csv_path": csv_path,
-            "status": "success"
+            "status": "success",
+            "message": "Data successfully scraped and indicators calculated! 📊🚀"
         }
         
-        return json.dumps(summary)
+        # ensure_ascii=False is the FIX for the codec error
+        return json.dumps(summary, ensure_ascii=False)
     
     except Exception as e:
-        return json.dumps({"error": str(e), "ticker": ticker, "status": "failed"})
+        # Returning errors with ensure_ascii=False to prevent further crashes
+        return json.dumps({"error": str(e), "status": "failed"}, ensure_ascii=False)
