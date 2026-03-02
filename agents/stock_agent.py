@@ -10,7 +10,22 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 import operator
+# agents/stock_agent.py
+# Replace the line: from tools import ALL_TOOLS
+# With these lines:
 
+from tools.stock_data_tool import scrape_stock_data
+from tools.news_tool import scrape_stock_news
+from tools.visualization_tool import generate_stock_visualizations
+from tools.prediction_tool import predict_stock_price
+
+# Create ALL_TOOLS directly in this file
+ALL_TOOLS = [
+    scrape_stock_data,
+    scrape_stock_news,
+    generate_stock_visualizations,
+    predict_stock_price
+]
 from tools import ALL_TOOLS
 
 
