@@ -7,10 +7,15 @@ from datetime import datetime, timedelta
 from typing import Optional
 from langchain_core.tools import tool
 
-# Setup a session with headers to avoid being blocked by Yahoo Finance
+# ─── BROWSER EMULATION (ESSENTIAL FOR AZURE) ──────────────────────────────────
+# This session mimics a real user to prevent Yahoo Finance from blocking Azure IPs
 session = requests.Session()
 session.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Origin': 'https://finance.yahoo.com',
+    'Referer': 'https://finance.yahoo.com/'
 })
 
 @tool
@@ -21,59 +26,41 @@ def scrape_stock_data(
     end_date: Optional[str] = None,
 ) -> str:
     """
-    Scrape historical stock data using yfinance.
+    Scrape historical stock data using yfinance with Azure-safe headers.
     
     Args:
         ticker: Stock ticker symbol (e.g., 'AAPL', 'MSFT', 'V')
-        period_years: Number of years of historical data to fetch (default: 2)
-        start_date: Optional start date in YYYY-MM-DD format
-        end_date: Optional end date in YYYY-MM-DD format
-    
-    Returns:
-        JSON string with stock data summary and file path
+        period_years: Years of data to fetch (default: 2)
+        start_date: Optional YYYY-MM-DD
+        end_date: Optional YYYY-MM-DD
     """
     try:
         ticker_upper = ticker.upper()
         stock = yf.Ticker(ticker_upper, session=session)
         
-        # Determine the timeframe
+        # 1. Fetch data using 'period' for higher reliability on cloud servers
         if start_date and end_date:
             hist = stock.history(start=start_date, end=end_date)
         else:
-            # period="2y" is often more reliable than manual date subtraction
             hist = stock.history(period=f"{period_years}y")
         
         if hist.empty:
-            return json.dumps({"error": f"No data found for ticker {ticker_upper}. This may be due to API blocking or an invalid ticker.", "status": "failed"})
-        
-        # --- FIX: Handle Multi-Index Columns (New in yfinance) ---
+            return json.dumps({
+                "error": f"Yahoo Finance returned no data for {ticker_upper}. This usually means the IP is blocked or the ticker is invalid.",
+                "status": "failed"
+            })
+
+        # 2. FIX: FLATTEN MULTI-INDEX COLUMNS (Crucial for 2025/2026 yfinance)
         if isinstance(hist.columns, pd.MultiIndex):
             hist.columns = hist.columns.get_level_values(0)
-        
-        # Get company info safely
-        info = stock.info
-        company_name = info.get("longName", ticker_upper)
-        sector = info.get("sector", "Unknown")
-        industry = info.get("industry", "Unknown")
-        market_cap = info.get("marketCap", 0)
-        pe_ratio = info.get("trailingPE", None)
-        
-        # Calculate basic statistics
+            
+        # 3. CLEAN DATA
         hist.reset_index(inplace=True)
-        # Ensure Date is timezone-naive for CSV and JSON compatibility
+        # Remove timezones for compatibility with CSV and Excel
         if hist['Date'].dt.tz is not None:
             hist['Date'] = hist['Date'].dt.tz_localize(None)
-        
-        current_price = float(hist['Close'].iloc[-1])
-        start_price = float(hist['Close'].iloc[0])
-        price_change_pct = ((current_price - start_price) / start_price) * 100
-        
-        avg_volume = float(hist['Volume'].mean())
-        avg_price = float(hist['Close'].mean())
-        max_price = float(hist['Close'].max())
-        min_price = float(hist['Close'].min())
-        
-        # --- Technical Indicators ---
+
+        # 4. CALCULATE TECHNICAL INDICATORS
         # Moving Averages
         hist['MA_20'] = hist['Close'].rolling(window=20).mean()
         hist['MA_50'] = hist['Close'].rolling(window=50).mean()
@@ -86,54 +73,47 @@ def scrape_stock_data(
         rs = gain / loss
         hist['RSI'] = 100 - (100 / (1 + rs))
         
-        # Bollinger Bands
-        hist['BB_Middle'] = hist['Close'].rolling(window=20).mean()
-        hist['BB_Upper'] = hist['BB_Middle'] + 2 * hist['Close'].rolling(window=20).std()
-        hist['BB_Lower'] = hist['BB_Middle'] - 2 * hist['Close'].rolling(window=20).std()
-        
-        # MACD (Moving Average Convergence Divergence)
+        # MACD
         exp1 = hist['Close'].ewm(span=12, adjust=False).mean()
         exp2 = hist['Close'].ewm(span=26, adjust=False).mean()
         hist['MACD'] = exp1 - exp2
         hist['Signal_Line'] = hist['MACD'].ewm(span=9, adjust=False).mean()
+
+        # Bollinger Bands
+        hist['BB_Middle'] = hist['Close'].rolling(window=20).mean()
+        hist['BB_Upper'] = hist['BB_Middle'] + 2 * hist['Close'].rolling(window=20).std()
+        hist['BB_Lower'] = hist['BB_Middle'] - 2 * hist['Close'].rolling(window=20).std()
+
+        # 5. GET COMPANY INFO SAFELY
+        info = stock.info
+        current_price = float(hist['Close'].iloc[-1])
+        start_price = float(hist['Close'].iloc[0])
         
-        # --- Save Data ---
+        # 6. SAVE TO CSV (ENSURE DIRECTORY EXISTS)
         os.makedirs("outputs/data", exist_ok=True)
         csv_path = f"outputs/data/{ticker_upper}_historical.csv"
         hist.to_csv(csv_path, index=False)
         
+        # 7. BUILD SUMMARY
         summary = {
             "ticker": ticker_upper,
-            "company_name": company_name,
-            "sector": sector,
-            "industry": industry,
-            "market_cap": market_cap,
-            "pe_ratio": pe_ratio,
-            "data_points": len(hist),
-            "date_range": {
-                "start": str(hist['Date'].iloc[0]),
-                "end": str(hist['Date'].iloc[-1])
-            },
+            "company_name": info.get("longName", ticker_upper),
+            "sector": info.get("sector", "N/A"),
             "price_stats": {
                 "current_price": round(current_price, 2),
-                "start_price": round(start_price, 2),
-                "price_change_pct": round(price_change_pct, 2),
-                "avg_price": round(avg_price, 2),
-                "max_price": round(max_price, 2),
-                "min_price": round(min_price, 2),
+                "price_change_pct": round(((current_price - start_price) / start_price) * 100, 2),
+                "avg_price": round(float(hist['Close'].mean()), 2)
             },
             "latest_indicators": {
                 "rsi": round(float(hist['RSI'].iloc[-1]), 2) if not pd.isna(hist['RSI'].iloc[-1]) else None,
                 "macd": round(float(hist['MACD'].iloc[-1]), 4) if not pd.isna(hist['MACD'].iloc[-1]) else None,
-                "ma_20": round(float(hist['MA_20'].iloc[-1]), 2) if not pd.isna(hist['MA_20'].iloc[-1]) else None,
                 "ma_50": round(float(hist['MA_50'].iloc[-1]), 2) if not pd.isna(hist['MA_50'].iloc[-1]) else None,
             },
-            "avg_volume": int(avg_volume),
             "csv_path": csv_path,
             "status": "success"
         }
         
-        return json.dumps(summary, default=str)
+        return json.dumps(summary)
     
     except Exception as e:
         return json.dumps({"error": str(e), "ticker": ticker, "status": "failed"})
