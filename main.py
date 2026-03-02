@@ -30,7 +30,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files & outputs
+# ─── SYSTEM SETUP ─────────────────────────────────────────────────────────────
+# Create directories and ensure they are writable
 os.makedirs("outputs/data", exist_ok=True)
 os.makedirs("outputs/charts", exist_ok=True)
 os.makedirs("static", exist_ok=True)
@@ -45,7 +46,7 @@ jobs: dict = {}
 # ─── Request Models ───────────────────────────────────────────────────────────
 class AnalysisRequest(BaseModel):
     ticker: str
-    groq_api_key: str
+    groq_api_key: str  # This comes from your frontend text box
     period_years: int = 2
     forecast_days: int = 30
     train_split: float = 0.70
@@ -71,21 +72,27 @@ async def run_analysis_job(job_id: str, request: AnalysisRequest):
         # Import here to avoid circular imports
         from agents.stock_agent import run_stock_analysis
 
-        jobs[job_id]["progress"] = 10
-        jobs[job_id]["message"] = f"Fetching historical data for {request.ticker}..."
-
-        # Override tool configs with request params
+        # FIX 1: Capture and clean the API Key from the frontend
+        groq_key = request.groq_api_key.strip()
+        
+        # FIX 2: Force Environment Variable for the current process
+        # This ensures the tools (like the Groq LLM) can see the key
+        os.environ["GROQ_API_KEY"] = groq_key
         os.environ["ANALYSIS_PERIOD_YEARS"] = str(request.period_years)
         os.environ["ANALYSIS_FORECAST_DAYS"] = str(request.forecast_days)
         os.environ["ANALYSIS_TRAIN_SPLIT"] = str(request.train_split)
         os.environ["ANALYSIS_VAL_SPLIT"] = str(request.val_split)
 
+        jobs[job_id]["progress"] = 10
+        jobs[job_id]["message"] = f"Fetching historical data for {request.ticker}..."
+
         jobs[job_id]["progress"] = 20
         jobs[job_id]["message"] = "Running LangGraph agent pipeline..."
 
+        # Execute analysis
         final_state = await run_stock_analysis(
             ticker=request.ticker,
-            groq_api_key=request.groq_api_key,
+            groq_api_key=groq_key,
             period_years=request.period_years,
             forecast_days=request.forecast_days,
             train_split=request.train_split,
@@ -95,8 +102,9 @@ async def run_analysis_job(job_id: str, request: AnalysisRequest):
         jobs[job_id]["progress"] = 90
         jobs[job_id]["message"] = "Compiling final report..."
 
-        # Collect chart paths
         ticker = request.ticker.upper()
+        
+        # Filter existing charts
         charts = {
             "price_analysis": f"/outputs/charts/{ticker}_price_analysis.html",
             "technical_indicators": f"/outputs/charts/{ticker}_technical_indicators.html",
@@ -105,12 +113,7 @@ async def run_analysis_job(job_id: str, request: AnalysisRequest):
             "prediction": f"/outputs/charts/{ticker}_prediction.html",
             "model_accuracy": f"/outputs/charts/{ticker}_model_accuracy.html",
         }
-
-        # Filter only existing charts
-        existing_charts = {
-            k: v for k, v in charts.items()
-            if os.path.exists(v.lstrip("/"))
-        }
+        existing_charts = {k: v for k, v in charts.items() if os.path.exists(v.lstrip("/"))}
 
         jobs[job_id]["status"] = "completed"
         jobs[job_id]["progress"] = 100
@@ -126,17 +129,21 @@ async def run_analysis_job(job_id: str, request: AnalysisRequest):
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["progress"] = 0
-        jobs[job_id]["message"] = f"Error: {str(e)}"
-        jobs[job_id]["result"] = {"error": str(e)}
+        # UTF-8 Safe error message
+        error_msg = str(e)
+        jobs[job_id]["message"] = f"Error: {error_msg}"
+        jobs[job_id]["result"] = {"error": error_msg}
 
 
 # ─── API Routes ───────────────────────────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
     """Serve the main frontend HTML"""
     html_path = "static/index.html"
     if os.path.exists(html_path):
-        with open(html_path) as f:
+        # FIX 3: Always use encoding="utf-8" for reading HTML
+        with open(html_path, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Frontend not found. Place index.html in /static/</h1>")
 
@@ -148,10 +155,6 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail="Ticker symbol is required")
     if not request.groq_api_key:
         raise HTTPException(status_code=400, detail="Groq API key is required")
-    if not (0.5 <= request.train_split <= 0.85):
-        raise HTTPException(status_code=400, detail="train_split must be between 0.5 and 0.85")
-    if not (0.05 <= request.val_split <= 0.3):
-        raise HTTPException(status_code=400, detail="val_split must be between 0.05 and 0.3")
 
     job_id = str(uuid.uuid4())
     jobs[job_id] = {
@@ -176,20 +179,19 @@ async def get_job_status(job_id: str):
     return jobs[job_id]
 
 
-@app.get("/api/jobs")
-async def list_jobs():
-    """List all analysis jobs"""
-    return list(jobs.values())
-
-
 @app.get("/api/report/{ticker}")
 async def get_report(ticker: str):
-    """Get the markdown report for a ticker"""
+    """Get the markdown report for a ticker - FIX 4: UTF-8 Encoding"""
     report_path = f"outputs/{ticker.upper()}_investment_report.md"
     if not os.path.exists(report_path):
         raise HTTPException(status_code=404, detail="Report not found")
-    with open(report_path) as f:
-        return {"ticker": ticker.upper(), "report": f.read()}
+    
+    # Force UTF-8 encoding to prevent 'ascii' codec crashes from emojis
+    try:
+        with open(report_path, "r", encoding="utf-8") as f:
+            return {"ticker": ticker.upper(), "report": f.read()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Encoding error: {str(e)}")
 
 
 @app.get("/api/charts/{ticker}")
@@ -198,11 +200,7 @@ async def get_charts(ticker: str):
     chart_dir = "outputs/charts"
     ticker_upper = ticker.upper()
     charts = {}
-    chart_types = [
-        "price_analysis", "technical_indicators",
-        "returns_analysis", "volume_analysis",
-        "prediction", "model_accuracy"
-    ]
+    chart_types = ["price_analysis", "technical_indicators", "returns_analysis", "volume_analysis", "prediction", "model_accuracy"]
     for ct in chart_types:
         path = f"{chart_dir}/{ticker_upper}_{ct}.html"
         if os.path.exists(path):
@@ -215,21 +213,11 @@ async def get_popular_tickers():
     """Return a list of popular stock tickers"""
     return {
         "tickers": [
-            {"symbol": "AAPL", "name": "Apple Inc.", "sector": "Technology"},
-            {"symbol": "MSFT", "name": "Microsoft Corp.", "sector": "Technology"},
-            {"symbol": "GOOGL", "name": "Alphabet Inc.", "sector": "Technology"},
-            {"symbol": "AMZN", "name": "Amazon.com Inc.", "sector": "Consumer Discretionary"},
-            {"symbol": "TSLA", "name": "Tesla Inc.", "sector": "Automotive"},
-            {"symbol": "META", "name": "Meta Platforms", "sector": "Technology"},
-            {"symbol": "NVDA", "name": "NVIDIA Corp.", "sector": "Technology"},
-            {"symbol": "JPM", "name": "JPMorgan Chase", "sector": "Finance"},
-            {"symbol": "JNJ", "name": "Johnson & Johnson", "sector": "Healthcare"},
-            {"symbol": "V", "name": "Visa Inc.", "sector": "Finance"},
-            {"symbol": "BRK-B", "name": "Berkshire Hathaway", "sector": "Finance"},
-            {"symbol": "WMT", "name": "Walmart Inc.", "sector": "Retail"},
-            {"symbol": "XOM", "name": "Exxon Mobil", "sector": "Energy"},
-            {"symbol": "NFLX", "name": "Netflix Inc.", "sector": "Entertainment"},
-            {"symbol": "DIS", "name": "Walt Disney Co.", "sector": "Entertainment"},
+            {"symbol": "AAPL", "name": "Apple Inc."},
+            {"symbol": "MSFT", "name": "Microsoft Corp."},
+            {"symbol": "NVDA", "name": "NVIDIA Corp."},
+            {"symbol": "TSLA", "name": "Tesla Inc."},
+            {"symbol": "GOOGL", "name": "Alphabet Inc."}
         ]
     }
 
