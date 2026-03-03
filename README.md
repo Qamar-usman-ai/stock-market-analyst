@@ -1,6 +1,8 @@
 # 📈 Stock Market AI Analyst
 
-An AI-powered stock market analysis agent built with **LangGraph**, **FastAPI**, **ARIMA/SARIMA** predictions, and a modern dark-themed frontend. Uses the **Groq API** (LLaMA model) for LLM reasoning.
+An AI-powered stock market analysis agent built with **LangGraph**, **FastAPI**, **ARIMA/SARIMA** predictions, and a modern dark-themed frontend. Uses the **Groq API** (LLaMA 3.3 70B) for LLM reasoning and **Finnhub API** for reliable cloud-compatible stock data.
+
+> ✅ **Cloud Ready** — Works on Azure, AWS, GCP. No Yahoo Finance scraping.
 
 ---
 
@@ -9,7 +11,7 @@ An AI-powered stock market analysis agent built with **LangGraph**, **FastAPI**,
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Frontend (HTML/JS)                        │
-│         User selects stock, enters Groq API key               │
+│     User enters Groq key + Finnhub key, selects stock         │
 └─────────────────────┬───────────────────────────────────────┘
                       │ HTTP POST /api/analyze
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -23,60 +25,95 @@ An AI-powered stock market analysis agent built with **LangGraph**, **FastAPI**,
 └──────┬──────────────┬──────────────┬──────────────┬─────────┘
        │              │              │              │
   Tool 1          Tool 2         Tool 3          Tool 4
-  YFinance       News            Viz            SARIMA
-  Scraper       Scraper        Charts         Prediction
+  Finnhub        Finnhub        Plotly          SARIMA
+  Stock Data     News+Sentiment  Charts         Prediction
 ```
+
+---
 
 ## 📁 Project Structure
 
 ```
-stock-agent/
-├── main.py                    # FastAPI app + API routes
-├── requirements.txt           # Python dependencies
-├── Dockerfile                 # Container image
-├── docker-compose.yml         # Local multi-container setup
-├── azure-deploy.yaml          # Azure deployment config
-├── .gitignore
-├── README.md
+stock-market-analyst/
+│
+├── main.py                        # FastAPI app + API routes
+├── requirements.txt               # Python dependencies
+├── Dockerfile                     # Container image
+├── docker-compose.yml             # Local multi-container setup
+├── azure-deploy.yaml              # Azure deployment config
+├── README.md                      # This file
 │
 ├── agents/
 │   ├── __init__.py
-│   └── stock_agent.py         # LangGraph StateGraph agent
+│   └── stock_agent.py             # LangGraph StateGraph agent
 │
 ├── tools/
 │   ├── __init__.py
-│   ├── stock_data_tool.py     # Tool 1: YFinance data scraper
-│   ├── news_tool.py           # Tool 2: News + sentiment
-│   ├── visualization_tool.py  # Tool 3: Plotly charts (6 charts)
-│   └── prediction_tool.py     # Tool 4: ARIMA/SARIMA forecast
+│   ├── stock_data_tool.py         # Tool 1: Finnhub stock data + indicators
+│   ├── news_tool.py               # Tool 2: Finnhub news + sentiment
+│   ├── visualization_tool.py      # Tool 3: Plotly charts (6 charts)
+│   └── prediction_tool.py         # Tool 4: ARIMA/SARIMA forecast
 │
 ├── static/
-│   └── index.html             # Complete frontend SPA
+│   └── index.html                 # Frontend SPA (dark theme)
 │
-└── outputs/                   # Generated files (gitignored)
-    ├── data/                  # CSV + JSON data
-    ├── charts/                # HTML chart files
-    └── *.md                   # Investment reports
+└── outputs/                       # Generated files (gitignored)
+    ├── data/                      # CSV + JSON data files
+    ├── charts/                    # Interactive HTML charts
+    └── *.md                       # Investment reports
 ```
+
+---
+
+## 🛠️ The 4 AI Tools
+
+| # | Tool | File | Description |
+|---|------|------|-------------|
+| 1 | `scrape_stock_data` | `tools/stock_data_tool.py` | Fetches OHLCV from **Finnhub API**, computes RSI, MACD, Bollinger Bands, Moving Averages |
+| 2 | `scrape_stock_news` | `tools/news_tool.py` | Gets latest news from **Finnhub company-news API** + Google News RSS fallback, keyword sentiment analysis |
+| 3 | `generate_stock_visualizations` | `tools/visualization_tool.py` | 6 interactive Plotly charts: candlestick, technical indicators, returns, volume, prediction, model accuracy |
+| 4 | `predict_stock_price` | `tools/prediction_tool.py` | Auto-selects ARIMA/SARIMA params via AIC grid search, train/val/test split, full metrics |
+
+---
+
+## 🔑 API Keys Required
+
+This app needs **2 free API keys** — both entered directly in the frontend UI. No `.env` files or Azure App Settings needed.
+
+### 1. Groq API Key (LLM)
+- Go to **[console.groq.com](https://console.groq.com)**
+- Sign up free → Create API Key
+- Used for: LLaMA 3.3 70B reasoning and investment report generation
+
+### 2. Finnhub API Key (Stock Data)
+- Go to **[finnhub.io/register](https://finnhub.io/register)**
+- Sign up free → copy API key from dashboard
+- Free tier: **60 requests/minute**
+- Used for: OHLCV price history, company news, company profile
+- ✅ **Works on Azure/cloud** — proper REST API, no IP blocking
+
+> ⚠️ **Why not yfinance?** yfinance scrapes Yahoo Finance which **blocks all cloud datacenter IPs** (Azure, AWS, GCP). No User-Agent trick fixes this — the IP itself is rejected. Finnhub is the correct solution.
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Python 3.11+
-- [Groq API Key](https://console.groq.com) (free tier available)
+- Groq API Key (free)
+- Finnhub API Key (free)
 
 ### Local Setup
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/stock-market-analyst.git
+git clone https://github.com/Qamar-usman-ai/stock-market-analyst.git
 cd stock-market-analyst
 
 # 2. Create virtual environment
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate        # Windows: venv\Scripts\activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
@@ -84,8 +121,8 @@ pip install -r requirements.txt
 # 4. Run the app
 uvicorn main:app --reload --port 8000
 
-# 5. Open browser
-open http://localhost:8000
+# 5. Open browser at http://localhost:8000
+# Enter your Groq + Finnhub keys in the UI and start analyzing
 ```
 
 ### Docker Setup
@@ -101,24 +138,24 @@ docker run -p 8000:8000 stock-analyst
 
 ---
 
-## 🛠️ The 4 Tools
+## 📦 Requirements
 
-| Tool | File | Description |
-|------|------|-------------|
-| **scrape_stock_data** | `tools/stock_data_tool.py` | Fetches OHLCV data, calculates RSI, MACD, Bollinger Bands, Moving Averages |
-| **scrape_stock_news** | `tools/news_tool.py` | Gets latest news via yfinance + Yahoo RSS, keyword sentiment analysis |
-| **generate_stock_visualizations** | `tools/visualization_tool.py` | 4 interactive Plotly charts (candlestick, technical, returns, volume) |
-| **predict_stock_price** | `tools/prediction_tool.py` | Auto-selects ARIMA/SARIMA params via AIC grid search, train/val/test split, metrics |
-
----
-
-## 📊 ARIMA/SARIMA Model Details
-
-- **Stationarity**: Augmented Dickey-Fuller test determines differencing order `d`
-- **Parameter selection**: Grid search over p=0..3, q=0..3, minimize AIC
-- **SARIMA seasonal order**: (1,1,1,5) — weekly seasonality
-- **Data split**: Train / Validation / Test (configurable via UI)
-- **Metrics reported**: MAE, RMSE, MSE, R², MAPE
+```txt
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+langgraph>=0.1.0
+langchain>=0.2.0
+langchain-groq>=0.1.0
+finnhub-python>=2.4.20
+feedparser>=6.0.11
+pandas>=2.2.0
+numpy>=1.26.0
+statsmodels>=0.14.0
+pmdarima>=2.0.4
+plotly>=5.22.0
+python-dotenv>=1.0.0
+aiofiles>=23.2.1
+```
 
 ---
 
@@ -127,7 +164,7 @@ docker run -p 8000:8000 stock-analyst
 ### Option 1: Azure Container Apps (Recommended)
 
 ```bash
-# 1. Login to Azure
+# 1. Login
 az login
 
 # 2. Create resource group
@@ -137,7 +174,7 @@ az group create --name stock-analyst-rg --location eastus
 az acr create --resource-group stock-analyst-rg \
   --name mystockanalystacr --sku Basic
 
-# 4. Build & push image
+# 4. Build and push image
 az acr build --registry mystockanalystacr \
   --image stock-market-analyst:latest .
 
@@ -147,7 +184,7 @@ az containerapp env create \
   --resource-group stock-analyst-rg \
   --location eastus
 
-# 6. Deploy Container App
+# 6. Deploy
 az containerapp create \
   --name stock-market-analyst \
   --resource-group stock-analyst-rg \
@@ -172,7 +209,8 @@ az webapp create \
 
 ### CI/CD with GitHub Actions
 
-1. Set up Azure credentials as GitHub secret:
+1. Create service principal:
+
 ```bash
 az ad sp create-for-rbac --name "stock-analyst-sp" \
   --role contributor \
@@ -180,42 +218,91 @@ az ad sp create-for-rbac --name "stock-analyst-sp" \
   --sdk-auth
 ```
 
-2. Add to GitHub Secrets: `AZURE_CREDENTIALS`
-3. Push to `main` branch — auto-deploys!
+2. Add output as GitHub Secret: `AZURE_CREDENTIALS`
+3. Push to `main` → auto-deploys via `.github/workflows/`
 
 ---
 
-## 📤 GitHub Upload
+## 📊 ARIMA/SARIMA Model Details
 
-```bash
-# Initialize git
-git init
-git add .
-git commit -m "Initial commit: Stock Market AI Analyst"
-
-# Create repo on GitHub, then:
-git remote add origin https://github.com/YOUR_USERNAME/stock-market-analyst.git
-git branch -M main
-git push -u origin main
-```
+| Setting | Detail |
+|---------|--------|
+| Stationarity test | Augmented Dickey-Fuller (ADF) |
+| Parameter selection | Grid search p=0..3, q=0..3, minimize AIC |
+| SARIMA seasonal order | (1,1,1,5) — weekly seasonality |
+| Data split | Configurable Train / Validation / Test via UI |
+| Metrics | MAE, RMSE, MSE, R², MAPE |
+| Forecast horizon | 7–90 days (UI slider) |
 
 ---
 
-## 🔑 API Reference
+## 📈 Features
+
+- **6 Interactive Charts** — Candlestick, Bollinger Bands, RSI, MACD, Volume, SARIMA Forecast
+- **AI Investment Report** — Full markdown report with BUY / HOLD / SELL recommendation
+- **News Sentiment Analysis** — Keyword scoring across latest Finnhub headlines
+- **Technical Indicators** — RSI, MACD, Bollinger Bands, MA20/50/200
+- **Dark Theme UI** — GitHub-style dark interface, fully responsive
+- **Real-time Progress Bar** — Non-blocking background jobs with live status polling
+- **CSV + JSON Export** — All data saved as downloadable files
+
+---
+
+## 🔌 API Reference
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Frontend UI |
 | `/api/analyze` | POST | Start analysis job |
-| `/api/status/{job_id}` | GET | Get job status + progress |
-| `/api/jobs` | GET | List all jobs |
-| `/api/report/{ticker}` | GET | Get markdown report |
+| `/api/status/{job_id}` | GET | Poll job status and progress |
+| `/api/report/{ticker}` | GET | Get markdown investment report |
 | `/api/charts/{ticker}` | GET | Get chart file paths |
-| `/api/tickers` | GET | Popular stock list |
+| `/api/tickers` | GET | List of popular stocks |
 | `/health` | GET | Health check |
+
+### POST `/api/analyze` — Request Body
+
+```json
+{
+  "ticker": "AAPL",
+  "groq_api_key": "gsk_xxxxxxxxxxxx",
+  "finnhub_api_key": "xxxxxxxxxxxx",
+  "period_years": 2,
+  "forecast_days": 30,
+  "train_split": 0.70,
+  "val_split": 0.15,
+  "use_sarima": true
+}
+```
+
+---
+
+## ❓ Troubleshooting
+
+**Stock data not loading on Azure**
+Caused by `yfinance` which scrapes Yahoo Finance — Yahoo blocks all cloud IPs. This project uses Finnhub API which works everywhere.
+
+**"No data found" error**
+- Verify your Finnhub API key is correct in the UI
+- Confirm the ticker is valid (e.g. `AAPL`, not `Apple`)
+
+**Report generation fails**
+- Verify your Groq API key at [console.groq.com](https://console.groq.com)
+- Groq free tier has rate limits — wait 1 minute and retry
+
+**Charts not showing**
+- Charts generate after data fetch — wait for 100% progress bar
+- Ensure `outputs/charts/` directory is writable in your container
 
 ---
 
 ## 📝 License
 
 MIT License — free to use and modify.
+
+---
+
+## 👤 Author
+
+**Qamar Usman**
+- GitHub: [@Qamar-usman-ai](https://github.com/Qamar-usman-ai)
