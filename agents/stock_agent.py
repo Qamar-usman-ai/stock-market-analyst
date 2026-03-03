@@ -1,14 +1,19 @@
-# agents/stock_agent.py
 """
-LangGraph Stock Analysis Agent
-Uses 4 tools: data scraping, news, visualization, prediction
-Corrected for UTF-8 and Azure Compatibility.
+LangGraph Stock Analysis Agent - FINAL FIX
+==========================================
+Root cause of "no API key" error:
+  os.environ changes in main.py do NOT reliably reach tool functions
+  in async background tasks on Azure Container Apps.
+
+Fix:
+  Pass finnhub_api_key directly from the agent state into each tool call.
+  No environment variable dependency for the API key.
 """
 import json
 import os
 import traceback
 import operator
-from typing import TypedDict, Annotated, Sequence, Dict, Any, List, Optional
+from typing import TypedDict, Annotated, Sequence, Dict, Any, List
 from datetime import datetime
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
@@ -16,7 +21,6 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
-# ─── Tool Imports ─────────────────────────────────────────────────────────────
 try:
     from tools.stock_data_tool import scrape_stock_data
     from tools.news_tool import scrape_stock_news
@@ -24,61 +28,73 @@ try:
     from tools.prediction_tool import predict_stock_price
     TOOLS_IMPORT_SUCCESS = True
 except ImportError as e:
-    print(f"❌ Error importing tools: {e}")
+    print(f"Error importing tools: {e}")
     TOOLS_IMPORT_SUCCESS = False
-    # Fallback placeholders
-    def scrape_stock_data(*args, **kwargs): return json.dumps({"error": "Import failed"}, ensure_ascii=False)
-    def scrape_stock_news(*args, **kwargs): return json.dumps({"error": "Import failed"}, ensure_ascii=False)
-    def generate_stock_visualizations(*args, **kwargs): return json.dumps({"error": "Import failed"}, ensure_ascii=False)
-    def predict_stock_price(*args, **kwargs): return json.dumps({"error": "Import failed"}, ensure_ascii=False)
+    def scrape_stock_data(*a, **k): return json.dumps({"error": "Import failed"})
+    def scrape_stock_news(*a, **k): return json.dumps({"error": "Import failed"})
+    def generate_stock_visualizations(*a, **k): return json.dumps({"error": "Import failed"})
+    def predict_stock_price(*a, **k): return json.dumps({"error": "Import failed"})
 
 ALL_TOOLS = [scrape_stock_data, scrape_stock_news, generate_stock_visualizations, predict_stock_price]
 
-# ─── Ensure directories exist ────────────────────────────────────────────────
-def ensure_directories():
-    dirs = ["outputs", "outputs/data", "outputs/charts"]
-    for dir_path in dirs:
-        os.makedirs(dir_path, exist_ok=True)
+os.makedirs("outputs", exist_ok=True)
+os.makedirs("outputs/data", exist_ok=True)
+os.makedirs("outputs/charts", exist_ok=True)
 
-ensure_directories()
 
-# ─── State Definition ────────────────────────────────────────────────────────
 class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], operator.add]
-    ticker: str
-    groq_api_key: str
+    messages:        Annotated[Sequence[BaseMessage], operator.add]
+    ticker:          str
+    groq_api_key:    str
+    finnhub_api_key: str          # ← KEY ADDITION: stored in state
     analysis_config: dict
-    final_report: str
-    tool_results: Dict[str, Any]
-    errors: List[str]
-    execution_step: int
+    final_report:    str
+    tool_results:    Dict[str, Any]
+    errors:          List[str]
+    execution_step:  int
 
-# ─── Agent Node ──────────────────────────────────────────────────────────────
-def create_agent_node(groq_api_key: str):
+
+def create_agent_node(groq_api_key: str, finnhub_api_key: str):
     def agent_node(state: AgentState):
-        ticker = state['ticker'].upper()
-        step = state.get('execution_step', 0)
-        
+        ticker = state["ticker"].upper()
+        step   = state.get("execution_step", 0)
+
+        # Which tools have already been called?
         used_tools = set()
-        for msg in state.get('messages', []):
+        for msg in state.get("messages", []):
             if isinstance(msg, ToolMessage):
                 used_tools.add(msg.name)
-        
+
+        # Ordered sequence of tool calls
+        # ── CRITICAL: pass finnhub_api_key directly in each tool call ──────────
+        fkey = state.get("finnhub_api_key", finnhub_api_key)   # read from state
+
         tool_sequence = [
-            ("scrape_stock_data", f"Get historical data for {ticker}"),
-            ("scrape_stock_news", f"Get latest news for {ticker}"),
-            ("generate_stock_visualizations", f"Create charts for {ticker}"),
-            ("predict_stock_price", f"Run price prediction for {ticker}")
+            ("scrape_stock_data",
+             f"Call scrape_stock_data with ticker='{ticker}' and finnhub_api_key='{fkey}' and period_years=2"),
+
+            ("scrape_stock_news",
+             f"Call scrape_stock_news with ticker='{ticker}' and finnhub_api_key='{fkey}'"),
+
+            ("generate_stock_visualizations",
+             f"Call generate_stock_visualizations with ticker='{ticker}'"),
+
+            ("predict_stock_price",
+             f"Call predict_stock_price with ticker='{ticker}'"),
         ]
-        
-        next_tool = next((name for name, _ in tool_sequence if name not in used_tools), None)
-        next_instruction = next((inst for name, inst in tool_sequence if name not in used_tools), None)
-        
-        if next_tool:
-            system_prompt = f"Analyze {ticker}. Next tool: {next_tool}. Tasks remaining: {4 - len(used_tools)}."
+
+        next_item = next(((name, inst) for name, inst in tool_sequence if name not in used_tools), None)
+
+        if next_item:
+            tool_name, instruction = next_item
+            system_prompt = (
+                f"You are a stock analyst. {instruction}. "
+                f"You MUST call the tool {tool_name} right now with the exact parameters specified. "
+                f"Do not write any text. Just call the tool."
+            )
         else:
-            system_prompt = "All tools executed. Respond with 'GENERATE_REPORT'."
-        
+            system_prompt = "All 4 tools have been called. Respond with exactly: GENERATE_REPORT"
+
         try:
             llm = ChatGroq(
                 api_key=groq_api_key,
@@ -86,53 +102,61 @@ def create_agent_node(groq_api_key: str):
                 temperature=0.1,
                 max_tokens=1024,
             ).bind_tools(ALL_TOOLS)
-            
+
             messages = [HumanMessage(content=system_prompt)] + list(state.get("messages", []))
-            
-            if next_tool:
+
+            if next_item:
                 response = llm.invoke(messages)
             else:
                 response = AIMessage(content="GENERATE_REPORT")
-            
+
             return {"messages": [response], "execution_step": step + 1}
-            
+
         except Exception as e:
             return {
-                "messages": [AIMessage(content=f"Error: {str(e)}")],
-                "errors": state.get('errors', []) + [str(e)],
-                "execution_step": step + 1
+                "messages":       [AIMessage(content=f"Error: {str(e)}")],
+                "errors":         state.get("errors", []) + [str(e)],
+                "execution_step": step + 1,
             }
+
     return agent_node
 
-# ─── Router ───────────────────────────────────────────────────────────────────
+
 def should_continue(state: AgentState) -> str:
-    if len(state.get('errors', [])) > 3: return "report"
-    messages = state.get('messages', [])
-    if not messages: return "agent"
-    
-    last_message = messages[-1]
-    if isinstance(last_message, AIMessage) and last_message.content == "GENERATE_REPORT":
+    if len(state.get("errors", [])) > 3:
         return "report"
-    
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+
+    messages = state.get("messages", [])
+    if not messages:
+        return "agent"
+
+    last = messages[-1]
+
+    if isinstance(last, AIMessage) and last.content == "GENERATE_REPORT":
+        return "report"
+
+    if hasattr(last, "tool_calls") and last.tool_calls:
         return "tools"
-        
+
+    # Safety: if too many steps, force report
+    if state.get("execution_step", 0) > 20:
+        return "report"
+
     return "agent"
 
-# ─── Report Generator Node ───────────────────────────────────────────────────
+
 def create_report_node(groq_api_key: str):
     def report_node(state: AgentState):
-        ticker = state['ticker'].upper()
+        ticker      = state["ticker"].upper()
         tool_results = {}
-        
-        for msg in state.get('messages', []):
+
+        for msg in state.get("messages", []):
             if isinstance(msg, ToolMessage):
                 try:
                     tool_results[msg.name] = json.loads(msg.content)
-                except:
-                    tool_results[msg.name] = {"raw": msg.content[:500]}
-        
-        # Build prompt using available tool results
+                except Exception:
+                    tool_results[msg.name] = {"raw": str(msg.content)[:500]}
+
         try:
             llm = ChatGroq(
                 api_key=groq_api_key,
@@ -140,71 +164,121 @@ def create_report_node(groq_api_key: str):
                 temperature=0.3,
                 max_tokens=4096,
             )
-            
-            report_prompt = f"Generate a detailed investment report for {ticker} using these tool results: {json.dumps(tool_results, ensure_ascii=False)[:3000]}"
-            report_response = llm.invoke([HumanMessage(content=report_prompt)])
-            final_report = report_response.content
-            
-            # CRITICAL FIX: Save with UTF-8 encoding
+
+            # Check if stock data was actually retrieved
+            stock_data = tool_results.get("scrape_stock_data", {})
+            has_data   = stock_data.get("status") == "success"
+
+            report_prompt = f"""
+You are a professional stock market analyst. Generate a comprehensive investment report for {ticker}.
+
+Here is the data from our analysis tools:
+{json.dumps(tool_results, ensure_ascii=False)[:4000]}
+
+{"The stock data was successfully retrieved. Use the price, RSI, MACD, moving averages, and other indicators in your analysis." if has_data else "Note: Stock price data could not be retrieved. Base your analysis only on available news data."}
+
+Your report must include:
+1. Executive Summary with current price and key metrics (if available)
+2. Technical Analysis (RSI, MACD, Bollinger Bands, Moving Averages) - only if data available
+3. News Sentiment Analysis
+4. Price Prediction Summary (if available)
+5. Risk Assessment
+6. Clear BUY / HOLD / SELL recommendation with reasoning
+7. Price targets (if data available)
+
+Write in professional markdown format.
+"""
+            response      = llm.invoke([HumanMessage(content=report_prompt)])
+            final_report  = response.content
+
+            os.makedirs("outputs", exist_ok=True)
             report_path = f"outputs/{ticker}_investment_report.md"
             with open(report_path, "w", encoding="utf-8") as f:
                 f.write(final_report)
-                
-            # Save summary as UTF-8
-            with open(f"outputs/{ticker}_summary.json", "w", encoding="utf-8") as f:
-                json.dump({"ticker": ticker, "status": "complete", "errors": state.get('errors')}, f, ensure_ascii=False)
-                
+
+            summary_path = f"outputs/{ticker}_summary.json"
+            with open(summary_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "ticker":      ticker,
+                    "status":      "complete",
+                    "has_data":    has_data,
+                    "tools_used":  list(tool_results.keys()),
+                    "errors":      state.get("errors", []),
+                    "generated":   datetime.now().isoformat(),
+                }, f, ensure_ascii=False)
+
         except Exception as e:
             final_report = f"Error generating report: {str(e)}"
-        
-        return {"final_report": final_report, "messages": [AIMessage(content=final_report)]}
+
+        return {
+            "final_report": final_report,
+            "messages":     [AIMessage(content=final_report)],
+        }
+
     return report_node
 
-# ─── Graph Builder ────────────────────────────────────────────────────────────
-def build_stock_agent(groq_api_key: str):
+
+def build_stock_agent(groq_api_key: str, finnhub_api_key: str):
     workflow = StateGraph(AgentState)
-    workflow.add_node("agent", create_agent_node(groq_api_key))
-    workflow.add_node("tools", ToolNode(ALL_TOOLS))
+    workflow.add_node("agent",  create_agent_node(groq_api_key, finnhub_api_key))
+    workflow.add_node("tools",  ToolNode(ALL_TOOLS))
     workflow.add_node("report", create_report_node(groq_api_key))
-    
+
     workflow.set_entry_point("agent")
-    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", "report": "report", "agent": "agent"})
-    workflow.add_edge("tools", "agent")
+    workflow.add_conditional_edges(
+        "agent", should_continue,
+        {"tools": "tools", "report": "report", "agent": "agent"}
+    )
+    workflow.add_edge("tools",  "agent")
     workflow.add_edge("report", END)
-    
+
     return workflow.compile()
 
-# ─── Main Run Function ────────────────────────────────────────────────────────
-async def run_stock_analysis(ticker: str, groq_api_key: str, **kwargs) -> Dict[str, Any]:
+
+async def run_stock_analysis(
+    ticker: str,
+    groq_api_key: str,
+    finnhub_api_key: str = "",   # ← receives key directly
+    **kwargs
+) -> Dict[str, Any]:
     try:
-        app = build_stock_agent(groq_api_key)
+        # Also set env var as backup — belt AND suspenders
+        if finnhub_api_key:
+            os.environ["FINNHUB_API_KEY"] = finnhub_api_key
+
+        app = build_stock_agent(groq_api_key, finnhub_api_key)
+
         initial_state = {
-            "messages": [HumanMessage(content=f"Analyze {ticker.upper()}")],
-            "ticker": ticker.upper(),
-            "groq_api_key": groq_api_key,
+            "messages":        [HumanMessage(content=f"Analyze {ticker.upper()} stock completely.")],
+            "ticker":          ticker.upper(),
+            "groq_api_key":    groq_api_key,
+            "finnhub_api_key": finnhub_api_key,   # ← stored in state
             "analysis_config": kwargs,
-            "final_report": "",
-            "tool_results": {},
-            "errors": [],
-            "execution_step": 0
+            "final_report":    "",
+            "tool_results":    {},
+            "errors":          [],
+            "execution_step":  0,
         }
-        return await app.ainvoke(initial_state, {"recursion_limit": 25})
+
+        return await app.ainvoke(initial_state, {"recursion_limit": 30})
+
     except Exception as e:
-        # UTF-8 Safe Error Logging
-        err_msg = traceback.format_exc()
-        with open(f"outputs/{ticker.upper()}_error.log", "w", encoding="utf-8") as f:
-            f.write(err_msg)
+        tb = traceback.format_exc()
+        try:
+            with open(f"outputs/{ticker.upper()}_error.log", "w", encoding="utf-8") as f:
+                f.write(f"Error: {str(e)}\n\n{tb}")
+        except Exception:
+            pass
         return {"error": str(e), "final_report": f"Fatal error: {str(e)}"}
+
 
 def check_analysis_status(ticker: str) -> Dict[str, Any]:
     ticker = ticker.upper()
     return {
-        "ticker": ticker,
-        "report_exists": os.path.exists(f"outputs/{ticker}_investment_report.md"),
-        "summary_exists": os.path.exists(f"outputs/{ticker}_summary.json")
+        "ticker":         ticker,
+        "report_exists":  os.path.exists(f"outputs/{ticker}_investment_report.md"),
+        "summary_exists": os.path.exists(f"outputs/{ticker}_summary.json"),
     }
 
-def list_analyzed_stocks() -> List[str]:
-    return [f.replace("_investment_report.md", "") for f in os.listdir("outputs") if f.endswith("_investment_report.md")]
 
-__all__ = ['run_stock_analysis', 'check_analysis_status', 'list_analyzed_stocks']
+__all__ = ["run_stock_analysis", "check_analysis_status"]
