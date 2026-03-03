@@ -13,64 +13,42 @@
       --yellow: #d29922; --purple: #bc8cff; --orange: #ffa657;
     }
     body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
-    
-    /* Header */
     header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
     header h1 { font-size: 1.4rem; font-weight: 700; background: linear-gradient(135deg, #58a6ff, #3fb950); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
     header .subtitle { font-size: 0.8rem; color: var(--muted); }
-    
-    /* Main Layout */
     .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
     .grid-2 { display: grid; grid-template-columns: 380px 1fr; gap: 24px; align-items: start; }
-    
-    /* Cards */
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
     .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
     .card h2 .icon { font-size: 1.2rem; }
-    
-    /* Form Elements */
     .form-group { margin-bottom: 16px; }
     label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
     input, select { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; color: var(--text); font-size: 0.9rem; outline: none; transition: border-color .2s; }
     input:focus, select:focus { border-color: var(--blue); }
     input[type="password"] { font-family: monospace; }
-    
-    /* Ticker Grid */
     .ticker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
     .ticker-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; cursor: pointer; text-align: center; transition: all .2s; }
     .ticker-btn:hover { border-color: var(--blue); background: rgba(88,166,255,0.1); }
     .ticker-btn.active { border-color: var(--blue); background: rgba(88,166,255,0.2); }
     .ticker-btn .symbol { font-weight: 700; font-size: 0.85rem; color: var(--blue); }
     .ticker-btn .name { font-size: 0.65rem; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    
-    /* Sliders */
     .slider-row { display: flex; align-items: center; gap: 12px; }
     input[type="range"] { flex: 1; accent-color: var(--blue); }
     .slider-val { font-weight: 700; color: var(--blue); min-width: 40px; text-align: right; }
-    
-    /* Button */
     .btn-analyze { width: 100%; padding: 14px; background: linear-gradient(135deg, #1f6feb, #388bfd); border: none; border-radius: 8px; color: white; font-size: 1rem; font-weight: 700; cursor: pointer; transition: opacity .2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
     .btn-analyze:hover { opacity: 0.9; }
     .btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
-    
-    /* Progress */
     .progress-section { margin-top: 16px; display: none; }
     .progress-bar { background: var(--surface2); border-radius: 99px; height: 8px; overflow: hidden; margin: 8px 0; }
     .progress-fill { height: 100%; background: linear-gradient(90deg, #1f6feb, #3fb950); border-radius: 99px; transition: width .4s; }
     .progress-msg { font-size: 0.8rem; color: var(--muted); }
-    
-    /* Results */
     .results-section { display: none; }
-    
-    /* Tabs */
     .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
     .tab { padding: 10px 18px; cursor: pointer; border-radius: 8px 8px 0 0; font-size: 0.85rem; color: var(--muted); border: 1px solid transparent; border-bottom: none; transition: all .2s; }
     .tab:hover { color: var(--text); }
     .tab.active { background: var(--surface); border-color: var(--border); color: var(--text); margin-bottom: -1px; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-    
-    /* Report */
     .report-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 20px; max-height: 600px; overflow-y: auto; line-height: 1.7; }
     .report-box h1 { font-size: 1.4rem; color: var(--blue); margin-bottom: 16px; }
     .report-box h2 { font-size: 1.1rem; color: var(--yellow); margin: 20px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
@@ -78,16 +56,12 @@
     .report-box p { margin-bottom: 10px; color: var(--muted); }
     .report-box strong { color: var(--text); }
     .report-box ul, .report-box ol { padding-left: 20px; margin-bottom: 10px; color: var(--muted); }
-    
-    /* Chart viewer */
     .chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
     .chart-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
     .chart-card-header { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
     .chart-card iframe { width: 100%; height: 400px; border: none; background: var(--bg); }
     .open-btn { font-size: 0.75rem; color: var(--blue); text-decoration: none; cursor: pointer; }
     .open-btn:hover { text-decoration: underline; }
-    
-    /* Metrics table */
     .metrics-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
     .metric-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
     .metric-card h3 { font-size: 0.8rem; color: var(--muted); margin-bottom: 10px; }
@@ -98,28 +72,23 @@
     .val.green { color: var(--green); }
     .val.red { color: var(--red); }
     .val.blue { color: var(--blue); }
-    
-    /* Badge */
     .badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 700; }
     .badge.buy { background: rgba(63,185,80,0.2); color: var(--green); border: 1px solid var(--green); }
     .badge.sell { background: rgba(248,81,73,0.2); color: var(--red); border: 1px solid var(--red); }
     .badge.hold { background: rgba(210,153,34,0.2); color: var(--yellow); border: 1px solid var(--yellow); }
-    
-    /* Status indicator */
     .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
     .status-dot.green { background: var(--green); animation: pulse 1.5s infinite; }
     .status-dot.red { background: var(--red); }
     .status-dot.yellow { background: var(--yellow); }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    
-    /* Error */
     .error-box { background: rgba(248,81,73,0.1); border: 1px solid var(--red); border-radius: 8px; padding: 14px; color: var(--red); font-size: 0.9rem; }
-    
-    /* API key toggle */
     .api-key-wrap { position: relative; }
     .api-key-wrap input { padding-right: 40px; }
     .toggle-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); cursor: pointer; color: var(--muted); font-size: 1rem; user-select: none; }
-    
+    /* helper link under input */
+    .key-hint { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+    .key-hint a { color: var(--blue); text-decoration: none; }
+    .key-hint a:hover { text-decoration: underline; }
     @media (max-width: 900px) {
       .grid-2 { grid-template-columns: 1fr; }
       .chart-grid { grid-template-columns: 1fr; }
@@ -140,17 +109,30 @@
 
   <div class="container">
     <div class="grid-2">
-      
+
       <!-- LEFT: Config Panel -->
       <div>
         <div class="card">
           <h2><span class="icon">🔑</span> API Configuration</h2>
+
+          <!-- Groq Key (unchanged) -->
           <div class="form-group">
             <label>Groq API Key</label>
             <div class="api-key-wrap">
               <input type="password" id="groq-key" placeholder="gsk_xxxxxxxxxxxx" />
-              <span class="toggle-eye" onclick="toggleKey()">👁</span>
+              <span class="toggle-eye" onclick="toggleKey('groq-key')">👁</span>
             </div>
+            <div class="key-hint">Get free key → <a href="https://console.groq.com" target="_blank">console.groq.com</a></div>
+          </div>
+
+          <!-- ── NEW: Finnhub Key ── -->
+          <div class="form-group">
+            <label>Finnhub API Key <span style="color:var(--green);font-size:0.7rem;">(stock data — replaces yfinance)</span></label>
+            <div class="api-key-wrap">
+              <input type="password" id="finnhub-key" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxx" />
+              <span class="toggle-eye" onclick="toggleKey('finnhub-key')">👁</span>
+            </div>
+            <div class="key-hint">Get free key → <a href="https://finnhub.io/register" target="_blank">finnhub.io/register</a></div>
           </div>
         </div>
 
@@ -161,14 +143,12 @@
             <input type="text" id="custom-ticker" placeholder="e.g. AAPL, TSLA, MSFT" style="text-transform:uppercase;" />
           </div>
           <label>Popular Stocks</label>
-          <div class="ticker-grid" id="ticker-grid">
-            <!-- Populated by JS -->
-          </div>
+          <div class="ticker-grid" id="ticker-grid"></div>
         </div>
 
         <div class="card" style="margin-top:16px;">
           <h2><span class="icon">⚙️</span> Analysis Settings</h2>
-          
+
           <div class="form-group">
             <label>Training Period</label>
             <div class="slider-row">
@@ -176,7 +156,7 @@
               <span class="slider-val" id="period-years-val">2 yr</span>
             </div>
           </div>
-          
+
           <div class="form-group">
             <label>Forecast Days</label>
             <div class="slider-row">
@@ -184,7 +164,7 @@
               <span class="slider-val" id="forecast-days-val">30d</span>
             </div>
           </div>
-          
+
           <div class="form-group">
             <label>Train Split <small style="color:var(--muted)">(remaining goes to val+test)</small></label>
             <div class="slider-row">
@@ -192,7 +172,7 @@
               <span class="slider-val" id="train-split-val">70%</span>
             </div>
           </div>
-          
+
           <div class="form-group">
             <label>Validation Split</label>
             <div class="slider-row">
@@ -200,7 +180,7 @@
               <span class="slider-val" id="val-split-val">15%</span>
             </div>
           </div>
-          
+
           <div class="form-group">
             <label>Prediction Model</label>
             <select id="use-sarima">
@@ -208,11 +188,11 @@
               <option value="false">ARIMA (Non-seasonal)</option>
             </select>
           </div>
-          
+
           <button class="btn-analyze" id="analyze-btn" onclick="startAnalysis()">
             🚀 Run Full Analysis
           </button>
-          
+
           <div class="progress-section" id="progress-section">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <span style="font-size:0.8rem;font-weight:600;">Progress</span>
@@ -221,11 +201,11 @@
             <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
             <div class="progress-msg" id="progress-msg">Starting...</div>
           </div>
-          
+
           <div id="error-box" class="error-box" style="margin-top:12px;display:none;"></div>
         </div>
       </div>
-      
+
       <!-- RIGHT: Results Panel -->
       <div class="results-section" id="results-section">
         <div class="card">
@@ -233,36 +213,31 @@
             <h2 style="margin:0;"><span class="icon">📋</span> Analysis Results: <span id="result-ticker" style="color:var(--blue)">-</span></h2>
             <span id="recommendation-badge"></span>
           </div>
-          
+
           <div class="tabs">
-            <div class="tab active" onclick="switchTab('report')">📄 Report</div>
-            <div class="tab" onclick="switchTab('charts')">📈 Charts</div>
-            <div class="tab" onclick="switchTab('metrics')">📊 Metrics</div>
+            <div class="tab active" onclick="switchTab('report', event)">📄 Report</div>
+            <div class="tab" onclick="switchTab('charts', event)">📈 Charts</div>
+            <div class="tab" onclick="switchTab('metrics', event)">📊 Metrics</div>
           </div>
-          
-          <!-- Report Tab -->
+
           <div id="tab-report" class="tab-content active">
             <div class="report-box" id="report-content"></div>
           </div>
-          
-          <!-- Charts Tab -->
           <div id="tab-charts" class="tab-content">
             <div class="chart-grid" id="charts-grid"></div>
           </div>
-          
-          <!-- Metrics Tab -->
           <div id="tab-metrics" class="tab-content">
             <div class="metrics-grid" id="metrics-grid"></div>
           </div>
         </div>
       </div>
-      
-      <!-- Placeholder when no results -->
+
+      <!-- Placeholder -->
       <div id="placeholder-section">
         <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;">
           <div style="font-size:4rem;margin-bottom:16px;">📊</div>
           <h3 style="color:var(--text);margin-bottom:8px;">Ready to Analyze</h3>
-          <p style="color:var(--muted);font-size:0.9rem;max-width:300px;">Enter your Groq API key, select a stock, configure settings and click <strong>Run Full Analysis</strong></p>
+          <p style="color:var(--muted);font-size:0.9rem;max-width:300px;">Enter your API keys, select a stock, configure settings and click <strong>Run Full Analysis</strong></p>
           <div style="margin-top:24px;display:flex;flex-direction:column;gap:8px;text-align:left;">
             <div style="font-size:0.85rem;color:var(--muted);">✅ 4 AI-powered analysis tools</div>
             <div style="font-size:0.85rem;color:var(--muted);">✅ SARIMA future price prediction</div>
@@ -272,7 +247,7 @@
           </div>
         </div>
       </div>
-      
+
     </div>
   </div>
 
@@ -281,7 +256,7 @@
     let currentJobId = null;
     let pollInterval = null;
     let selectedTicker = null;
-    
+
     const TICKERS = [
       { symbol: 'AAPL', name: 'Apple' },
       { symbol: 'MSFT', name: 'Microsoft' },
@@ -296,7 +271,7 @@
       { symbol: 'WMT', name: 'Walmart' },
       { symbol: 'DIS', name: 'Disney' }
     ];
-    
+
     function initTickerGrid() {
       const grid = document.getElementById('ticker-grid');
       TICKERS.forEach(t => {
@@ -308,7 +283,7 @@
         grid.appendChild(btn);
       });
     }
-    
+
     function selectTicker(symbol) {
       selectedTicker = symbol;
       document.getElementById('custom-ticker').value = symbol;
@@ -316,7 +291,7 @@
       const btn = document.getElementById(`ticker-${symbol}`);
       if (btn) btn.classList.add('active');
     }
-    
+
     document.getElementById('custom-ticker').addEventListener('input', e => {
       const val = e.target.value.toUpperCase();
       selectedTicker = val;
@@ -324,57 +299,60 @@
       const btn = document.getElementById(`ticker-${val}`);
       if (btn) btn.classList.add('active');
     });
-    
+
     function updateSlider(id, valId, fmt) {
       const v = document.getElementById(id).value;
       document.getElementById(valId).textContent = fmt(v);
     }
-    
-    function toggleKey() {
-      const inp = document.getElementById('groq-key');
+
+    // ── UPDATED: takes element id so both keys can toggle independently ──
+    function toggleKey(id) {
+      const inp = document.getElementById(id);
       inp.type = inp.type === 'password' ? 'text' : 'password';
     }
-    
-    function switchTab(name) {
+
+    function switchTab(name, event) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       event.target.classList.add('active');
       document.getElementById(`tab-${name}`).classList.add('active');
     }
-    
+
     function setStatus(text, color) {
       const s = document.getElementById('status-indicator');
-      const colors = { green: 'green', red: 'red', yellow: 'yellow' };
-      s.innerHTML = `<span class="status-dot ${colors[color] || 'yellow'}"></span>${text}`;
+      s.innerHTML = `<span class="status-dot ${color}"></span>${text}`;
     }
-    
+
     async function startAnalysis() {
-      const groqKey = document.getElementById('groq-key').value.trim();
-      const ticker = (document.getElementById('custom-ticker').value || selectedTicker || '').toUpperCase().trim();
-      
-      if (!groqKey) { showError('Please enter your Groq API key'); return; }
-      if (!ticker) { showError('Please select or enter a stock ticker'); return; }
-      
+      const groqKey     = document.getElementById('groq-key').value.trim();
+      const finnhubKey  = document.getElementById('finnhub-key').value.trim();   // ← NEW
+      const ticker      = (document.getElementById('custom-ticker').value || selectedTicker || '').toUpperCase().trim();
+
+      if (!groqKey)    { showError('Please enter your Groq API key');    return; }
+      if (!finnhubKey) { showError('Please enter your Finnhub API key'); return; }  // ← NEW
+      if (!ticker)     { showError('Please select or enter a stock ticker'); return; }
+
       const trainSplit = parseInt(document.getElementById('train-split').value) / 100;
-      const valSplit = parseInt(document.getElementById('val-split').value) / 100;
+      const valSplit   = parseInt(document.getElementById('val-split').value) / 100;
       if (trainSplit + valSplit >= 0.95) { showError('Train + Val split must be less than 95%'); return; }
-      
+
       clearError();
       setStatus('Analyzing...', 'green');
       document.getElementById('analyze-btn').disabled = true;
       document.getElementById('analyze-btn').innerHTML = '⏳ Analyzing...';
       document.getElementById('progress-section').style.display = 'block';
-      
+
       const payload = {
         ticker,
-        groq_api_key: groqKey,
-        period_years: parseInt(document.getElementById('period-years').value),
-        forecast_days: parseInt(document.getElementById('forecast-days').value),
-        train_split: trainSplit,
-        val_split: valSplit,
-        use_sarima: document.getElementById('use-sarima').value === 'true'
+        groq_api_key:    groqKey,
+        finnhub_api_key: finnhubKey,   // ← NEW
+        period_years:    parseInt(document.getElementById('period-years').value),
+        forecast_days:   parseInt(document.getElementById('forecast-days').value),
+        train_split:     trainSplit,
+        val_split:       valSplit,
+        use_sarima:      document.getElementById('use-sarima').value === 'true'
       };
-      
+
       try {
         const res = await fetch(`${API_BASE}/api/analyze`, {
           method: 'POST',
@@ -383,7 +361,6 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Request failed');
-        
         currentJobId = data.job_id;
         pollStatus();
       } catch (e) {
@@ -392,16 +369,14 @@
         setStatus('Error', 'red');
       }
     }
-    
+
     function pollStatus() {
       if (pollInterval) clearInterval(pollInterval);
       pollInterval = setInterval(async () => {
         try {
           const res = await fetch(`${API_BASE}/api/status/${currentJobId}`);
           const job = await res.json();
-          
           updateProgress(job.progress, job.message);
-          
           if (job.status === 'completed') {
             clearInterval(pollInterval);
             showResults(job);
@@ -413,49 +388,36 @@
             resetBtn();
             setStatus('Failed', 'red');
           }
-        } catch (e) {
-          // silent
-        }
+        } catch (e) { /* silent */ }
       }, 2000);
     }
-    
+
     function updateProgress(pct, msg) {
       document.getElementById('progress-fill').style.width = pct + '%';
       document.getElementById('progress-pct').textContent = pct + '%';
       document.getElementById('progress-msg').textContent = msg;
     }
-    
+
     function showResults(job) {
       const result = job.result;
       const ticker = job.ticker;
-      
       document.getElementById('placeholder-section').style.display = 'none';
       document.getElementById('results-section').style.display = 'block';
       document.getElementById('result-ticker').textContent = ticker;
-      
-      // Render report
       const report = result.final_report || '';
       document.getElementById('report-content').innerHTML = markdownToHTML(report);
-      
-      // Extract recommendation badge
       const match = report.match(/\b(BUY|SELL|HOLD)\b/i);
       if (match) {
         const rec = match[0].toUpperCase();
-        const badge = document.getElementById('recommendation-badge');
-        badge.innerHTML = `<span class="badge ${rec.toLowerCase()}">${rec}</span>`;
+        document.getElementById('recommendation-badge').innerHTML = `<span class="badge ${rec.toLowerCase()}">${rec}</span>`;
       }
-      
-      // Render charts
       renderCharts(result.charts || {}, ticker);
-      
-      // Render placeholder metrics tab
       renderMetricsPlaceholder(ticker);
     }
-    
+
     function renderCharts(charts, ticker) {
       const grid = document.getElementById('charts-grid');
       grid.innerHTML = '';
-      
       const chartNames = {
         price_analysis: '📈 Price & Moving Averages',
         technical_indicators: '📉 Bollinger Bands & RSI',
@@ -464,12 +426,10 @@
         prediction: '🔮 ARIMA/SARIMA Prediction',
         model_accuracy: '🎯 Model Accuracy'
       };
-      
       if (Object.keys(charts).length === 0) {
         grid.innerHTML = '<p style="color:var(--muted);padding:20px;">Charts will appear here after analysis completes.</p>';
         return;
       }
-      
       for (const [key, path] of Object.entries(charts)) {
         const div = document.createElement('div');
         div.className = 'chart-card';
@@ -483,10 +443,9 @@
         grid.appendChild(div);
       }
     }
-    
+
     function renderMetricsPlaceholder(ticker) {
-      const grid = document.getElementById('metrics-grid');
-      grid.innerHTML = `
+      document.getElementById('metrics-grid').innerHTML = `
         <div class="metric-card">
           <h3>📁 Output Files</h3>
           <div class="metric-row"><span class="key">Report</span><span class="val blue"><a href="/outputs/${ticker}_investment_report.md" target="_blank" style="color:var(--blue)">Download MD</a></span></div>
@@ -502,7 +461,7 @@
         </div>
       `;
     }
-    
+
     function markdownToHTML(md) {
       return md
         .replace(/^### (.+)$/gm, '<h3>$1</h3>')
@@ -516,23 +475,22 @@
         .replace(/^(?!<[h|u|o|l])/gm, '<p>')
         .replace(/<p><\/p>/g, '');
     }
-    
+
     function showError(msg) {
       const box = document.getElementById('error-box');
       box.style.display = 'block';
       box.textContent = '⚠️ ' + msg;
     }
-    
+
     function clearError() {
       document.getElementById('error-box').style.display = 'none';
     }
-    
+
     function resetBtn() {
       document.getElementById('analyze-btn').disabled = false;
       document.getElementById('analyze-btn').innerHTML = '🚀 Run Full Analysis';
     }
-    
-    // Init
+
     initTickerGrid();
   </script>
 </body>
