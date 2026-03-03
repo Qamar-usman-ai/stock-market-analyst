@@ -1,21 +1,14 @@
 """
-Tool 1: Stock Data Scraper - CLOUD FIXED
-========================================
-PROBLEM: yfinance is blocked by Yahoo Finance on ALL cloud IPs (Azure, AWS, GCP).
-No User-Agent trick fixes this. The IP itself gets rejected.
-
-SOLUTION: Replace yfinance with real APIs that work on cloud:
-  Primary:  Finnhub  (free, 60 req/min, no IP blocking)
-  Fallback: Alpha Vantage (free, 25 req/day)
-
-SETUP: Add these to your environment variables / Azure App Settings:
-  FINNHUB_API_KEY=your_key_here       <- get free at https://finnhub.io
-  ALPHAVANTAGE_API_KEY=your_key_here  <- get free at https://alphavantage.co
+Tool 1: Stock Data - FIXED
+===========================
+Critical fix: FINNHUB_API_KEY must be read INSIDE the tool function,
+not at module level. The module loads before main.py sets the env var.
 """
 
 import os
 import json
 import math
+import time
 import logging
 import requests
 import pandas as pd
@@ -24,36 +17,32 @@ from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
-FINNHUB_KEY = os.getenv("FINNHUB_API_KEY", "")
-AV_KEY = os.getenv("ALPHAVANTAGE_API_KEY", "")
 FINNHUB_BASE = "https://finnhub.io/api/v1"
-AV_BASE = "https://www.alphavantage.co/query"
+AV_BASE      = "https://www.alphavantage.co/query"
 
 
-# ─── HTTP helper ────────────────────────────────────────────────────────────────
+# ─── HTTP ────────────────────────────────────────────────────────────────────
 def _get(url: str, params: dict) -> dict:
     resp = requests.get(url, params=params, timeout=20)
     resp.raise_for_status()
     return resp.json()
 
 
-# ─── Finnhub data fetch ──────────────────────────────────────────────────────────
-def _finnhub_candles(symbol: str, period_years: int) -> pd.DataFrame:
-    """Fetch OHLCV from Finnhub /stock/candle (works on all cloud IPs)."""
-    import time as _time
-    now = int(_time.time())
+# ─── Finnhub ─────────────────────────────────────────────────────────────────
+def _finnhub_candles(symbol: str, period_years: int, api_key: str) -> pd.DataFrame:
+    now     = int(time.time())
     from_ts = now - (period_years * 365 * 24 * 3600)
 
     data = _get(f"{FINNHUB_BASE}/stock/candle", {
-        "symbol": symbol,
+        "symbol":     symbol,
         "resolution": "D",
-        "from": from_ts,
-        "to": now,
-        "token": FINNHUB_KEY,
+        "from":       from_ts,
+        "to":         now,
+        "token":      api_key,
     })
 
     if data.get("s") != "ok":
-        raise ValueError(f"Finnhub returned status: {data.get('s')} — {data}")
+        raise ValueError(f"Finnhub candle status: {data.get('s')} | response: {data}")
 
     df = pd.DataFrame({
         "Date":   pd.to_datetime(data["t"], unit="s").tz_localize(None),
@@ -66,80 +55,75 @@ def _finnhub_candles(symbol: str, period_years: int) -> pd.DataFrame:
     return df.sort_values("Date").reset_index(drop=True)
 
 
-def _finnhub_quote(symbol: str) -> dict:
-    """Fetch live quote from Finnhub."""
-    return _get(f"{FINNHUB_BASE}/quote", {"symbol": symbol, "token": FINNHUB_KEY})
+def _finnhub_profile(symbol: str, api_key: str) -> dict:
+    try:
+        return _get(f"{FINNHUB_BASE}/stock/profile2", {"symbol": symbol, "token": api_key})
+    except Exception as e:
+        logger.warning(f"Profile fetch failed: {e}")
+        return {}
 
 
-def _finnhub_profile(symbol: str) -> dict:
-    """Fetch company profile from Finnhub."""
-    return _get(f"{FINNHUB_BASE}/stock/profile2", {"symbol": symbol, "token": FINNHUB_KEY})
+def _finnhub_quote(symbol: str, api_key: str) -> dict:
+    try:
+        return _get(f"{FINNHUB_BASE}/quote", {"symbol": symbol, "token": api_key})
+    except Exception as e:
+        logger.warning(f"Quote fetch failed: {e}")
+        return {}
 
 
-# ─── Alpha Vantage fallback ──────────────────────────────────────────────────────
-def _av_candles(symbol: str) -> pd.DataFrame:
-    """Fallback: fetch daily OHLCV from Alpha Vantage."""
+# ─── Alpha Vantage fallback ───────────────────────────────────────────────────
+def _av_candles(symbol: str, api_key: str) -> pd.DataFrame:
     data = _get(AV_BASE, {
         "function":   "TIME_SERIES_DAILY_ADJUSTED",
         "symbol":     symbol,
         "outputsize": "full",
-        "apikey":     AV_KEY,
+        "apikey":     api_key,
     })
-
     ts = data.get("Time Series (Daily)")
     if not ts:
-        raise ValueError(f"Alpha Vantage error: {data.get('Information') or data.get('Note') or data}")
+        raise ValueError(f"Alpha Vantage error: {data}")
 
-    rows = []
-    for date_str, vals in ts.items():
-        rows.append({
-            "Date":   pd.to_datetime(date_str),
-            "Open":   float(vals["1. open"]),
-            "High":   float(vals["2. high"]),
-            "Low":    float(vals["3. low"]),
-            "Close":  float(vals["5. adjusted close"]),
-            "Volume": float(vals["6. volume"]),
-        })
+    rows = [{
+        "Date":   pd.to_datetime(d),
+        "Open":   float(v["1. open"]),
+        "High":   float(v["2. high"]),
+        "Low":    float(v["3. low"]),
+        "Close":  float(v["5. adjusted close"]),
+        "Volume": float(v["6. volume"]),
+    } for d, v in ts.items()]
 
-    df = pd.DataFrame(rows).sort_values("Date").reset_index(drop=True)
-    return df
+    return pd.DataFrame(rows).sort_values("Date").reset_index(drop=True)
 
 
-# ─── Technical Indicators ────────────────────────────────────────────────────────
-def _rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0).rolling(period).mean()
-    loss = (-delta.clip(upper=0)).rolling(period).mean()
-    rs = gain / loss.replace(0, np.nan)
-    return (100 - 100 / (1 + rs)).round(2)
+# ─── Indicators ───────────────────────────────────────────────────────────────
+def _rsi(s: pd.Series, p: int = 14) -> pd.Series:
+    d = s.diff()
+    g = d.clip(lower=0).rolling(p).mean()
+    l = (-d.clip(upper=0)).rolling(p).mean()
+    return (100 - 100 / (1 + g / l.replace(0, np.nan))).round(2)
 
 
-def _macd(series: pd.Series):
-    e12 = series.ewm(span=12, adjust=False).mean()
-    e26 = series.ewm(span=26, adjust=False).mean()
-    m = e12 - e26
-    s = m.ewm(span=9, adjust=False).mean()
-    return m.round(4), s.round(4), (m - s).round(4)
+def _macd(s: pd.Series):
+    e12 = s.ewm(span=12, adjust=False).mean()
+    e26 = s.ewm(span=26, adjust=False).mean()
+    m   = e12 - e26
+    sig = m.ewm(span=9, adjust=False).mean()
+    return m.round(4), sig.round(4), (m - sig).round(4)
 
 
-def _bollinger(series: pd.Series, period: int = 20):
-    sma = series.rolling(period).mean()
-    std = series.rolling(period).std()
+def _bollinger(s: pd.Series, p: int = 20):
+    sma = s.rolling(p).mean()
+    std = s.rolling(p).std()
     return (sma + 2*std).round(4), sma.round(4), (sma - 2*std).round(4)
 
 
-def _safe(val):
-    """Convert numpy/nan to plain Python for JSON serialization."""
-    if val is None:
-        return None
-    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
-        return None
-    if hasattr(val, "item"):
-        return val.item()
-    return val
+def _safe(v):
+    if v is None: return None
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)): return None
+    return v.item() if hasattr(v, "item") else v
 
 
-# ─── Main Tool ───────────────────────────────────────────────────────────────────
+# ─── Tool ─────────────────────────────────────────────────────────────────────
 @tool
 def scrape_stock_data(ticker: str, period_years: int = 2) -> str:
     """
@@ -148,44 +132,55 @@ def scrape_stock_data(ticker: str, period_years: int = 2) -> str:
 
     Args:
         ticker: Stock symbol e.g. 'AAPL', 'TSLA', 'MSFT'
-        period_years: How many years of history to fetch (default 2)
+        period_years: Years of history to fetch (default 2)
     """
     symbol = ticker.upper().strip()
-    df = None
+
+    # ── CRITICAL FIX: read key HERE inside the function, not at module level ──
+    finnhub_key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    av_key      = os.environ.get("ALPHAVANTAGE_API_KEY", "").strip()
+
+    # ── Validate key before making any request ────────────────────────────────
+    if not finnhub_key and not av_key:
+        return json.dumps({
+            "error": "No API key found. FINNHUB_API_KEY is not set in environment.",
+            "status": "failed",
+            "ticker": symbol
+        }, ensure_ascii=False)
+
+    logger.info(f"scrape_stock_data called for {symbol} | finnhub_key present: {bool(finnhub_key)}")
+
+    df     = None
     source = ""
 
-    # ── 1. Fetch OHLCV ─────────────────────────────────────────────────────────
-    if FINNHUB_KEY:
+    # ── 1. Try Finnhub ────────────────────────────────────────────────────────
+    if finnhub_key:
         try:
-            df = _finnhub_candles(symbol, period_years)
+            df     = _finnhub_candles(symbol, period_years, finnhub_key)
             source = "finnhub"
-            logger.info(f"Finnhub: got {len(df)} rows for {symbol}")
+            logger.info(f"Finnhub OK: {len(df)} rows for {symbol}")
         except Exception as e:
-            logger.warning(f"Finnhub failed ({e}), trying Alpha Vantage...")
+            logger.warning(f"Finnhub failed for {symbol}: {e}")
+
+    # ── 2. Try Alpha Vantage fallback ─────────────────────────────────────────
+    if (df is None or df.empty) and av_key:
+        try:
+            df = _av_candles(symbol, av_key)
+            cutoff = pd.Timestamp.now() - pd.DateOffset(years=period_years)
+            df     = df[df["Date"] >= cutoff].reset_index(drop=True)
+            source = "alphavantage"
+            logger.info(f"Alpha Vantage OK: {len(df)} rows for {symbol}")
+        except Exception as e:
+            logger.error(f"Alpha Vantage also failed for {symbol}: {e}")
 
     if df is None or df.empty:
-        if AV_KEY:
-            try:
-                df = _av_candles(symbol)
-                # Trim to requested period
-                cutoff = pd.Timestamp.now() - pd.DateOffset(years=period_years)
-                df = df[df["Date"] >= cutoff].reset_index(drop=True)
-                source = "alphavantage"
-                logger.info(f"Alpha Vantage: got {len(df)} rows for {symbol}")
-            except Exception as e:
-                logger.error(f"Alpha Vantage also failed: {e}")
-                return json.dumps({"error": str(e), "status": "failed", "symbol": symbol}, ensure_ascii=False)
-        else:
-            return json.dumps({
-                "error": "No API keys configured. Set FINNHUB_API_KEY and/or ALPHAVANTAGE_API_KEY in environment variables.",
-                "status": "failed",
-                "symbol": symbol
-            }, ensure_ascii=False)
+        return json.dumps({
+            "error": f"No data returned for {symbol} from any source. Check API key validity.",
+            "status": "failed",
+            "ticker": symbol
+        }, ensure_ascii=False)
 
-    if df is None or df.empty:
-        return json.dumps({"error": f"No data found for {symbol}", "status": "failed"}, ensure_ascii=False)
-
-    # ── 2. Technical Indicators ────────────────────────────────────────────────
+    # ── 3. Compute indicators ─────────────────────────────────────────────────
     close = df["Close"]
     df["RSI"]         = _rsi(close)
     df["MACD"], df["MACD_Signal"], df["MACD_Hist"] = _macd(close)
@@ -194,54 +189,48 @@ def scrape_stock_data(ticker: str, period_years: int = 2) -> str:
     df["MA_50"]  = close.rolling(50).mean().round(4)
     df["MA_200"] = close.rolling(200).mean().round(4)
 
-    # ── 3. Fetch Company Info (Finnhub only, non-fatal if fails) ───────────────
+    # ── 4. Company info ───────────────────────────────────────────────────────
     company_info = {}
-    if FINNHUB_KEY and source == "finnhub":
-        try:
-            profile = _finnhub_profile(symbol)
-            quote   = _finnhub_quote(symbol)
-            company_info = {
-                "longName":      profile.get("name"),
-                "sector":        profile.get("finnhubIndustry"),
-                "marketCap":     profile.get("marketCapitalization"),
-                "currentPrice":  quote.get("c"),
-                "change":        quote.get("d"),
-                "changePct":     quote.get("dp"),
-                "52w_high":      quote.get("h"),
-                "52w_low":       quote.get("l"),
-                "open":          quote.get("o"),
-                "prevClose":     quote.get("pc"),
-            }
-        except Exception as e:
-            logger.warning(f"Could not fetch company info: {e}")
+    if finnhub_key:
+        profile      = _finnhub_profile(symbol, finnhub_key)
+        quote        = _finnhub_quote(symbol, finnhub_key)
+        company_info = {
+            "longName":    profile.get("name"),
+            "sector":      profile.get("finnhubIndustry"),
+            "marketCap":   profile.get("marketCapitalization"),
+            "currentPrice": quote.get("c"),
+            "change":      quote.get("d"),
+            "changePct":   quote.get("dp"),
+            "prevClose":   quote.get("pc"),
+        }
 
-    # ── 4. Save CSV ────────────────────────────────────────────────────────────
+    # ── 5. Save CSV ───────────────────────────────────────────────────────────
     os.makedirs("outputs/data", exist_ok=True)
     csv_path = f"outputs/data/{symbol}_historical.csv"
     df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
     df.to_csv(csv_path, index=False, encoding="utf-8")
 
-    # ── 5. Build summary ───────────────────────────────────────────────────────
+    # ── 6. Build result ───────────────────────────────────────────────────────
     latest = df.iloc[-1]
     prev   = df.iloc[-2] if len(df) > 1 else latest
-    pct_chg = round((float(latest["Close"]) - float(prev["Close"])) / float(prev["Close"]) * 100, 2)
+    pct    = round((float(latest["Close"]) - float(prev["Close"])) / float(prev["Close"]) * 100, 2)
 
-    summary = {
-        "ticker":          symbol,
-        "source":          source,
-        "current_price":   _safe(latest["Close"]),
-        "price_change_pct": pct_chg,
-        "latest_rsi":      _safe(latest["RSI"]),
-        "latest_macd":     _safe(latest["MACD"]),
-        "ma_20":           _safe(latest["MA_20"]),
-        "ma_50":           _safe(latest["MA_50"]),
-        "ma_200":          _safe(latest["MA_200"]),
-        "52w_high":        _safe(float(close.max())),
-        "52w_low":         _safe(float(close.min())),
-        "data_points":     len(df),
-        "csv_path":        csv_path,
-        "company_info":    company_info,
-        "status":          "success",
+    result = {
+        "ticker":           symbol,
+        "source":           source,
+        "status":           "success",
+        "current_price":    _safe(latest["Close"]),
+        "price_change_pct": pct,
+        "latest_rsi":       _safe(latest["RSI"]),
+        "latest_macd":      _safe(latest["MACD"]),
+        "ma_20":            _safe(latest["MA_20"]),
+        "ma_50":            _safe(latest["MA_50"]),
+        "ma_200":           _safe(latest["MA_200"]),
+        "52w_high":         _safe(float(close.max())),
+        "52w_low":          _safe(float(close.min())),
+        "data_points":      len(df),
+        "csv_path":         csv_path,
+        "company_info":     company_info,
         "ohlcv": {
             "dates":  df["Date"].dt.strftime("%Y-%m-%d").tolist(),
             "open":   [_safe(v) for v in df["Open"]],
@@ -264,4 +253,4 @@ def scrape_stock_data(ticker: str, period_years: int = 2) -> str:
         },
     }
 
-    return json.dumps(summary, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False)
