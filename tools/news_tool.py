@@ -1,161 +1,151 @@
 """
-Tool 2: Latest Stock Market News Scraper
+Tool 2: News + Sentiment - CLOUD FIXED
+=======================================
+PROBLEM: yfinance .news scrapes Yahoo Finance which blocks cloud IPs.
+
+SOLUTION: Use Finnhub /company-news API (free, works on Azure/cloud).
+Fallback to Google News RSS (no API key needed).
+
+SETUP: Set FINNHUB_API_KEY in your environment variables.
 """
-import requests
+
+import os
 import json
-import yfinance as yf
+import logging
+import requests
+import feedparser
 from datetime import datetime, timedelta
 from langchain_core.tools import tool
-from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
+
+FINNHUB_KEY = os.getenv("FINNHUB_API_KEY", "")
+FINNHUB_BASE = "https://finnhub.io/api/v1"
+
+POSITIVE_WORDS = {
+    "beat", "beats", "surge", "soars", "rally", "record", "profit", "growth",
+    "buyback", "dividend", "upgrade", "outperform", "bullish", "strong", "gain",
+    "rises", "expansion", "acquisition", "breakthrough", "innovation", "exceed",
+}
+NEGATIVE_WORDS = {
+    "miss", "plunge", "crash", "loss", "decline", "downgrade", "underperform",
+    "bearish", "weak", "lawsuit", "fraud", "recall", "layoffs", "bankruptcy",
+    "investigation", "fine", "penalty", "warning", "disappointing", "cut",
+}
+
+
+def _score_sentiment(text: str) -> dict:
+    words = set(text.lower().split())
+    pos = len(words & POSITIVE_WORDS)
+    neg = len(words & NEGATIVE_WORDS)
+    total = pos + neg or 1
+    score = round((pos - neg) / total, 3)
+    label = "positive" if score > 0.1 else ("negative" if score < -0.1 else "neutral")
+    return {"score": score, "label": label}
+
+
+def _finnhub_news(symbol: str) -> list:
+    """Fetch company news from Finnhub (works on Azure)."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    from_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    resp = requests.get(f"{FINNHUB_BASE}/company-news", params={
+        "symbol": symbol,
+        "from":   from_date,
+        "to":     today,
+        "token":  FINNHUB_KEY,
+    }, timeout=15)
+    resp.raise_for_status()
+    items = resp.json() or []
+
+    return [{
+        "title":     i.get("headline", ""),
+        "summary":   i.get("summary", ""),
+        "link":      i.get("url", ""),
+        "published": datetime.fromtimestamp(i.get("datetime", 0)).strftime("%Y-%m-%d %H:%M"),
+        "source":    i.get("source", "Finnhub"),
+    } for i in items[:20]]
+
+
+def _google_rss_news(symbol: str) -> list:
+    """Fallback: Google News RSS — no API key, works on cloud."""
+    url = f"https://news.google.com/rss/search?q={symbol}+stock+market&hl=en-US&gl=US&ceid=US:en"
+    try:
+        resp = requests.get(url, timeout=15, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; RSS reader)"
+        })
+        feed = feedparser.parse(resp.content)
+        return [{
+            "title":     e.get("title", ""),
+            "summary":   e.get("summary", ""),
+            "link":      e.get("link", ""),
+            "published": e.get("published", ""),
+            "source":    "Google News",
+        } for e in feed.entries[:15]]
+    except Exception as e:
+        logger.warning(f"Google RSS failed: {e}")
+        return []
 
 
 @tool
-def scrape_stock_news(ticker: str, max_articles: int = 15) -> str:
+def scrape_stock_news(ticker: str) -> str:
     """
-    Scrape latest news articles related to a stock ticker.
-    
+    Fetches recent news and performs sentiment analysis for a stock.
+    Uses Finnhub news API (primary) and Google News RSS (fallback).
+    Works on Azure/cloud — no Yahoo Finance scraping.
+
     Args:
-        ticker: Stock ticker symbol (e.g., 'AAPL', 'MSFT')
-        max_articles: Maximum number of articles to retrieve (default: 15)
-    
-    Returns:
-        JSON string with news articles and sentiment analysis
+        ticker: Stock symbol e.g. 'AAPL', 'TSLA'
     """
-    try:
-        stock = yf.Ticker(ticker.upper())
-        info = stock.info
-        company_name = info.get("longName", ticker)
-        
-        news_list = []
-        
-        # Method 1: yfinance built-in news
-        yf_news = stock.news
-        if yf_news:
-            for article in yf_news[:max_articles]:
-                pub_time = article.get("providerPublishTime", 0)
-                if pub_time:
-                    pub_date = datetime.fromtimestamp(pub_time).strftime("%Y-%m-%d %H:%M")
-                else:
-                    pub_date = "Unknown"
-                
-                news_list.append({
-                    "title": article.get("title", ""),
-                    "publisher": article.get("publisher", ""),
-                    "link": article.get("link", ""),
-                    "published_date": pub_date,
-                    "source": "yfinance"
-                })
-        
-        # Method 2: Yahoo Finance RSS feed
+    symbol = ticker.upper().strip()
+    articles = []
+    source = ""
+
+    if FINNHUB_KEY:
         try:
-            rss_url = f"https://finance.yahoo.com/rss/headline?s={ticker.upper()}"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            response = requests.get(rss_url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, "xml")
-                items = soup.find_all("item")
-                for item in items[:5]:
-                    title = item.find("title")
-                    link = item.find("link")
-                    pub_date = item.find("pubDate")
-                    
-                    if title:
-                        news_list.append({
-                            "title": title.text if title else "",
-                            "publisher": "Yahoo Finance RSS",
-                            "link": link.text if link else "",
-                            "published_date": pub_date.text if pub_date else "Unknown",
-                            "source": "yahoo_rss"
-                        })
-        except Exception:
-            pass
-        
-        # Deduplicate by title
-        seen_titles = set()
-        unique_news = []
-        for article in news_list:
-            title_lower = article["title"].lower()
-            if title_lower not in seen_titles and article["title"]:
-                seen_titles.add(title_lower)
-                unique_news.append(article)
-        
-        news_list = unique_news[:max_articles]
-        
-        # Simple keyword-based sentiment analysis
-        positive_words = [
-            "surge", "gain", "rise", "growth", "profit", "beat", "exceed",
-            "strong", "bullish", "upgrade", "buy", "positive", "record", 
-            "high", "rally", "soar", "jump", "boost", "improve", "success",
-            "revenue", "earnings beat", "outperform"
-        ]
-        negative_words = [
-            "fall", "drop", "decline", "loss", "miss", "weak", "bearish",
-            "downgrade", "sell", "negative", "low", "crash", "plunge", "sink",
-            "cut", "layoff", "lawsuit", "investigation", "concern", "risk",
-            "debt", "bankruptcy", "disappointing", "underperform"
-        ]
-        
-        sentiment_scores = []
-        for article in news_list:
-            title_lower = article["title"].lower()
-            pos_count = sum(1 for w in positive_words if w in title_lower)
-            neg_count = sum(1 for w in negative_words if w in title_lower)
-            
-            if pos_count > neg_count:
-                sentiment = "positive"
-                score = pos_count - neg_count
-            elif neg_count > pos_count:
-                sentiment = "negative"
-                score = -(neg_count - pos_count)
-            else:
-                sentiment = "neutral"
-                score = 0
-            
-            article["sentiment"] = sentiment
-            article["sentiment_score"] = score
-            sentiment_scores.append(score)
-        
-        # Overall market sentiment
-        if sentiment_scores:
-            avg_sentiment = sum(sentiment_scores) / len(sentiment_scores)
-            if avg_sentiment > 0.3:
-                overall_sentiment = "Bullish"
-            elif avg_sentiment < -0.3:
-                overall_sentiment = "Bearish"
-            else:
-                overall_sentiment = "Neutral"
-        else:
-            overall_sentiment = "Neutral"
-            avg_sentiment = 0
-        
-        positive_count = sum(1 for a in news_list if a["sentiment"] == "positive")
-        negative_count = sum(1 for a in news_list if a["sentiment"] == "negative")
-        neutral_count = sum(1 for a in news_list if a["sentiment"] == "neutral")
-        
-        result = {
-            "ticker": ticker.upper(),
-            "company_name": company_name,
-            "articles_found": len(news_list),
-            "overall_sentiment": overall_sentiment,
-            "sentiment_breakdown": {
-                "positive": positive_count,
-                "negative": negative_count,
-                "neutral": neutral_count,
-                "avg_score": round(avg_sentiment, 3)
-            },
-            "news_articles": news_list,
-            "status": "success"
-        }
-        
-        # Save news to JSON
-        import os
-        os.makedirs("outputs/data", exist_ok=True)
-        news_path = f"outputs/data/{ticker}_news.json"
-        with open(news_path, "w") as f:
-            json.dump(result, f, indent=2, default=str)
-        
-        result["news_file"] = news_path
-        return json.dumps(result, default=str)
-    
-    except Exception as e:
-        return json.dumps({"error": str(e), "ticker": ticker, "status": "failed"})
+            articles = _finnhub_news(symbol)
+            source = "finnhub"
+        except Exception as e:
+            logger.warning(f"Finnhub news failed: {e}")
+
+    if not articles:
+        articles = _google_rss_news(symbol)
+        source = "google_rss"
+
+    if not articles:
+        return json.dumps({
+            "symbol": symbol,
+            "news_count": 0,
+            "articles": [],
+            "sentiment_summary": {"overall": "neutral", "avg_score": 0},
+            "warning": "No news found. Set FINNHUB_API_KEY for reliable news.",
+            "status": "empty"
+        }, ensure_ascii=False)
+
+    # Score sentiment
+    enriched = []
+    for art in articles:
+        text = f"{art['title']} {art['summary']}"
+        enriched.append({**art, "sentiment": _score_sentiment(text)})
+
+    scores = [a["sentiment"]["score"] for a in enriched]
+    avg_score = round(sum(scores) / len(scores), 3)
+    pos = sum(1 for s in scores if s > 0.1)
+    neg = sum(1 for s in scores if s < -0.1)
+
+    overall = "positive" if avg_score > 0.1 else ("negative" if avg_score < -0.1 else "neutral")
+
+    return json.dumps({
+        "symbol":    symbol,
+        "source":    source,
+        "news_count": len(enriched),
+        "articles":  enriched,
+        "sentiment_summary": {
+            "overall":           overall,
+            "avg_score":         avg_score,
+            "positive_articles": pos,
+            "negative_articles": neg,
+            "neutral_articles":  len(scores) - pos - neg,
+        },
+        "status": "success"
+    }, ensure_ascii=False)
